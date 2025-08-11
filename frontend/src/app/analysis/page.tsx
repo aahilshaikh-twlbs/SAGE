@@ -12,7 +12,7 @@ interface VideoData {
   id: string;
   filename: string;
   embedding_id: string;
-  video_id: string;
+  video_url: string;
   duration: number;
 }
 
@@ -249,7 +249,7 @@ export default function AnalysisPage() {
                 <h3 className="text-sm font-medium mb-3 text-[#9B9896]">{video1Data.filename}</h3>
                 <video
                   ref={video1Ref}
-                  src={`${API_BASE_URL}/serve-video/${video1Data.video_id}`}
+                  src={video1Data.video_url}
                   className="w-full rounded shadow-sm"
                   onTimeUpdate={handleTimeUpdate}
                   controls={false}
@@ -259,7 +259,7 @@ export default function AnalysisPage() {
                 <h3 className="text-sm font-medium mb-3 text-[#9B9896]">{video2Data.filename}</h3>
                 <video
                   ref={video2Ref}
-                  src={`${API_BASE_URL}/serve-video/${video2Data.video_id}`}
+                  src={video2Data.video_url}
                   className="w-full rounded shadow-sm"
                   controls={false}
                 />

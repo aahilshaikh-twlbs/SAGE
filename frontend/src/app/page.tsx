@@ -127,23 +127,21 @@ export default function LandingPage() {
         [uploadedVideos[1].id]: 'Uploading video 2...'
       });
       
-      // Upload and generate embeddings for both videos
-      const [result1, result2] = await Promise.all([
-        api.uploadAndGenerateEmbeddings(formData1).then(result => {
-          setEmbeddingProgress(prev => ({
-            ...prev,
-            [uploadedVideos[0].id]: 'Generating embeddings for video 1...'
-          }));
-          return result;
-        }),
-        api.uploadAndGenerateEmbeddings(formData2).then(result => {
-          setEmbeddingProgress(prev => ({
-            ...prev,
-            [uploadedVideos[1].id]: 'Generating embeddings for video 2...'
-          }));
-          return result;
-        })
-      ]);
+      // Upload and generate embeddings for both videos (sequential for stability)
+      const result1 = await api.uploadAndGenerateEmbeddings(formData1).then(result => {
+        setEmbeddingProgress(prev => ({
+          ...prev,
+          [uploadedVideos[0].id]: 'Generating embeddings for video 1...'
+        }));
+        return result;
+      });
+      const result2 = await api.uploadAndGenerateEmbeddings(formData2).then(result => {
+        setEmbeddingProgress(prev => ({
+          ...prev,
+          [uploadedVideos[1].id]: 'Generating embeddings for video 2...'
+        }));
+        return result;
+      });
       
       // Update progress
       setEmbeddingProgress({
@@ -156,7 +154,7 @@ export default function LandingPage() {
         id: uploadedVideos[0].id,
         filename: uploadedVideos[0].file.name,
         embedding_id: result1.embedding_id,
-        video_id: result1.video_id,
+        video_url: result1.video_url,
         duration: result1.duration
       }));
       
@@ -164,7 +162,7 @@ export default function LandingPage() {
         id: uploadedVideos[1].id,
         filename: uploadedVideos[1].file.name,
         embedding_id: result2.embedding_id,
-        video_id: result2.video_id,
+        video_url: result2.video_url,
         duration: result2.duration
       }));
       
