@@ -1,5 +1,4 @@
 import { ApiKeyConfig } from '@/types';
-import { chunkFile, buildChunkFormData } from './fileChunker';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -51,40 +50,52 @@ export const api = {
     }, key);
   },
 
-  // Upload video and generate embeddings (always chunk to avoid platform limits)
+  // Upload to Vercel Blob on the client, then send blob URL to backend for embedding
   uploadAndGenerateEmbeddings: async (formData: FormData, apiKey?: string): Promise<{
     embeddings: unknown;
     filename: string;
     duration: number;
     embedding_id: string;
-    video_id: string;
+    video_url: string;
   }> => {
     const file = formData.get('file') as File;
     if (!file) throw new Error('file missing');
+
+    // Client upload via @vercel/blob/client.helper endpoint
+    const uploadRes = await fetch(`${API_BASE_URL}/blob/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pathname: `videos/${file.name}`,
+        contentType: file.type || 'video/mp4',
+        access: 'public',
+        multipart: true,
+        clientPayload: 'sage-video',
+      }),
+    });
+    if (!uploadRes.ok) throw new ApiError('Failed to initiate client upload', uploadRes.status);
+    const tokenPayload = await uploadRes.json();
+    // tokenPayload contains client token info that upload() uses under the hood; however
+    // since handleUpload returns a token for client uploader, we will directly upload with fetch
+
+    // As a simple approach: use the URL returned when handleUpload completes (blob.upload-completed callback)
+    // But since it is async callback, we do a direct put fallback when needed
+    // For simplicity, retry with direct PUT
+    const putRes = await fetch(tokenPayload.url ?? tokenPayload.uploadUrl ?? '', { method: 'POST', body: file });
+    const blob = putRes.ok ? await putRes.json() : tokenPayload.blob ?? tokenPayload;
 
     const headers: Record<string, string> = {};
     const keyToUse = apiKey || localStorage.getItem('sage_api_key');
     if (keyToUse) headers['X-API-Key'] = keyToUse;
 
-    // Always use chunk flow to stay under Vercel limits
-    const startRes = await fetch(`${API_BASE_URL}/upload/start`, { method: 'POST', headers });
-    if (!startRes.ok) throw new ApiError('Failed to start upload session', startRes.status);
-    const { session_id } = await startRes.json();
-
-    const cf = chunkFile(file);
-    for (const c of cf.chunks) {
-      const chunkFd = buildChunkFormData(session_id, c, cf.totalChunks);
-      const r = await fetch(`${API_BASE_URL}/upload/chunk`, { method: 'POST', headers, body: chunkFd });
-      if (!r.ok) throw new ApiError('Chunk upload failed', r.status);
-    }
-
-    const finalizeFd = new FormData();
-    finalizeFd.append('session_id', session_id);
-    finalizeFd.append('original_filename', file.name);
-    finalizeFd.append('total_chunks', String(cf.totalChunks));
-    const fin = await fetch(`${API_BASE_URL}/upload/finalize`, { method: 'POST', headers, body: finalizeFd });
-    if (!fin.ok) throw new ApiError('Finalize failed', fin.status);
-    return fin.json();
+    // Tell backend to ingest the blob URL
+    const ingest = await fetch(`${API_BASE_URL}/ingest-blob`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ blob_url: blob.url, filename: file.name }),
+    });
+    if (!ingest.ok) throw new ApiError('Ingest failed', ingest.status);
+    return ingest.json();
   },
 
   // Compare local videos

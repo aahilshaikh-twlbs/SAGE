@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Query, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Query
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
@@ -12,9 +12,10 @@ import tempfile
 import os
 from datetime import datetime, timezone
 import sys
-import uuid
 from pathlib import Path
 import subprocess
+import shutil
+from urllib.request import urlopen
 
 # Configure logging with timestamps
 logging.basicConfig(
@@ -96,9 +97,7 @@ video_storage: Dict[str, bytes] = {}
 video_path_storage: Dict[str, str] = {}
 
 BASE_DIR = Path(__file__).resolve().parent
-UPLOADS_DIR = BASE_DIR / "uploads"
 VIDEOS_DIR = BASE_DIR / "videos"
-UPLOADS_DIR.mkdir(exist_ok=True)
 VIDEOS_DIR.mkdir(exist_ok=True)
 
 MAX_EMBED_DURATION_SEC = 7200  # 2 hours
@@ -206,63 +205,82 @@ async def validate_api_key(request: ApiKeyValidation):
         logger.error(f"API key validation failed: {e}")
         return ApiKeyResponse(key=request.key, isValid=False)
 
-@app.post("/upload-and-generate-embeddings")
-async def upload_and_generate_embeddings(
-    file: UploadFile = File(...),
-    tl: TwelveLabs = Depends(get_twelve_labs_client)
-):
+class BlobIngestRequest(BaseModel):
+    blob_url: str
+    filename: Optional[str] = None
+
+@app.post("/ingest-blob")
+async def ingest_blob(request: BlobIngestRequest, tl: TwelveLabs = Depends(get_twelve_labs_client)):
+    """Download video from a Vercel Blob URL and generate embeddings.
+    Does not persist the video; processes from a temporary file.
+    """
+    tmp_file_path = None
     try:
-        content = await file.read()
-        
+        # Download blob to a temp mp4 file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-            tmp_file.write(content)
             tmp_file_path = tmp_file.name
-        
-        logger.info(f"Creating embedding task for file: {file.filename}")
-        task = tl.embed.task.create(
-            model_name="Marengo-retrieval-2.7",
-            video_file=tmp_file_path,
-            video_clip_length=2,
-            video_embedding_scopes=["clip", "video"]
-        )
-        
-        logger.info(f"Waiting for embedding task {task.id} to complete")
-        def on_task_update(task: EmbeddingsTask):
-            logger.info(f"Task {task.id} status: {task.status}")
-        
-        task.wait_for_done(sleep_interval=5, callback=on_task_update)
-        
-        completed_task = tl.embed.task.retrieve(task.id)
-        os.unlink(tmp_file_path)
-        
-        embedding_id = f"embed_{task.id}"
-        video_id = f"video_{task.id}"
-        
-        duration = 0
-        if completed_task.video_embedding and completed_task.video_embedding.segments:
-            duration = completed_task.video_embedding.segments[-1].end_offset_sec
-        
+            with urlopen(request.blob_url) as resp:
+                shutil.copyfileobj(resp, tmp_file)
+
+        # Split if needed based on size/duration
+        session_root = Path(tempfile.mkdtemp(prefix="ingest_"))
+        parts_dir = session_root / "parts"
+        parts = split_video_if_needed(tmp_file_path, parts_dir)
+
+        # Embed all parts and merge segments
+        all_segments: List[Dict[str, Any]] = []
+        total_duration: float = 0.0
+        for idx, part_path in enumerate(parts):
+            part_start_offset = sum(run_ffprobe_duration_seconds(p) or 0.0 for p in parts[:idx])
+
+            logger.info(f"Creating embedding task for part {idx+1}/{len(parts)}: {part_path}")
+            task = tl.embed.task.create(
+                model_name="Marengo-retrieval-2.7",
+                video_file=part_path,
+                video_clip_length=2,
+                video_embedding_scopes=["clip", "video"],
+            )
+
+            def on_task_update(t: EmbeddingsTask):  # type: ignore
+                logger.info(f"Task {t.id} status: {t.status}")
+
+            task.wait_for_done(sleep_interval=5, callback=on_task_update)
+            completed_task = tl.embed.task.retrieve(task.id)
+
+            if completed_task.video_embedding and completed_task.video_embedding.segments:
+                for seg in completed_task.video_embedding.segments:
+                    all_segments.append({
+                        "start_offset_sec": seg.start_offset_sec + part_start_offset,
+                        "end_offset_sec": seg.end_offset_sec + part_start_offset,
+                        "embedding": seg.embeddings_float,
+                    })
+                total_duration = max(total_duration, part_start_offset + completed_task.video_embedding.segments[-1].end_offset_sec)
+
+        embedding_id = f"embed_{hashlib.sha256((request.blob_url).encode()).hexdigest()[:16]}"
         embedding_storage[embedding_id] = {
-            "filename": file.filename,
-            "embeddings": completed_task.video_embedding,
-            "duration": duration
+            "filename": request.filename or os.path.basename(request.blob_url),
+            "embeddings": {"segments": all_segments},
+            "duration": total_duration,
+            "source": "blob",
+            "blob_url": request.blob_url,
         }
-        
-        video_storage[video_id] = content
-        
+
         return {
-            "embeddings": completed_task.video_embedding,
-            "filename": file.filename,
-            "duration": duration,
+            "embeddings": {"segments": all_segments},
+            "filename": request.filename or os.path.basename(request.blob_url),
+            "duration": total_duration,
             "embedding_id": embedding_id,
-            "video_id": video_id
+            "video_url": request.blob_url,
         }
-        
     except Exception as e:
-        logger.error(f"Error generating embeddings: {e}")
-        if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
-            os.unlink(tmp_file_path)
-        raise HTTPException(status_code=500, detail=f"Failed to generate embeddings: {str(e)}")
+        logger.error(f"Error ingesting blob: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to ingest blob: {str(e)}")
+    finally:
+        try:
+            if tmp_file_path and os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
+        except Exception:
+            pass
 
 
 def run_ffprobe_duration_seconds(file_path: str) -> Optional[float]:
@@ -324,129 +342,7 @@ def concat_chunks_to_file(chunks_dir: Path, output_path: Path, total_chunks: int
                 out_f.write(cf.read())
 
 
-@app.post("/upload/start")
-async def start_chunked_upload(videoName: Optional[str] = Form(None)):
-    session_id = uuid.uuid4().hex
-    session_dir = UPLOADS_DIR / session_id
-    chunks_dir = session_dir / "chunks"
-    chunks_dir.mkdir(parents=True, exist_ok=True)
-    return {"session_id": session_id, "video_id": session_id, "video_name": videoName or "video.mp4"}
-
-
-@app.post("/upload/chunk")
-async def upload_chunk(
-    session_id: str = Form(...),
-    chunk_index: int = Form(...),
-    total_chunks: int = Form(...),
-    chunk: UploadFile = File(...),
-    tl: TwelveLabs = Depends(get_twelve_labs_client),
-):
-    try:
-        session_dir = UPLOADS_DIR / session_id / "chunks"
-        if not session_dir.exists():
-            raise HTTPException(status_code=404, detail="Invalid session_id")
-        dest_path = session_dir / f"chunk_{chunk_index}.bin"
-        contents = await chunk.read()
-        with open(dest_path, "wb") as f:
-            f.write(contents)
-        return {"message": f"Chunk {chunk_index + 1}/{total_chunks} stored"}
-    except Exception as e:
-        logger.error(f"Error storing chunk: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to store chunk: {str(e)}")
-
-
-@app.post("/upload/finalize")
-async def finalize_upload(
-    session_id: str = Form(...),
-    original_filename: str = Form(...),
-    total_chunks: int = Form(...),
-    tl: TwelveLabs = Depends(get_twelve_labs_client),
-):
-    session_root = UPLOADS_DIR / session_id
-    chunks_dir = session_root / "chunks"
-    if not chunks_dir.exists():
-        raise HTTPException(status_code=404, detail="Invalid session_id")
-
-    # Concatenate chunks into a single mp4 file
-    combined_path = str(session_root / "combined.mp4")
-    try:
-        concat_chunks_to_file(chunks_dir, Path(combined_path), int(total_chunks))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Concatenation failed: {e}")
-        raise HTTPException(status_code=500, detail="Concatenation failed")
-
-    # Split if needed
-    parts_dir = session_root / "parts"
-    parts = split_video_if_needed(combined_path, parts_dir)
-
-    # Run embedding tasks on one or multiple parts
-    all_segments: List[Dict[str, Any]] = []
-    total_duration: float = 0.0
-    part_offsets: List[float] = []
-    for idx, part_path in enumerate(parts):
-        part_start_offset = sum(run_ffprobe_duration_seconds(p) or 0.0 for p in parts[:idx])
-        part_offsets.append(part_start_offset)
-        logger.info(f"Creating embedding task for part {idx+1}/{len(parts)}: {part_path}")
-        task = tl.embed.task.create(
-            model_name="Marengo-retrieval-2.7",
-            video_file=part_path,
-            video_clip_length=2,
-            video_embedding_scopes=["clip", "video"],
-        )
-
-        def on_task_update(t: EmbeddingsTask):  # type: ignore
-            logger.info(f"Task {t.id} status: {t.status}")
-
-        task.wait_for_done(sleep_interval=5, callback=on_task_update)
-        completed_task = tl.embed.task.retrieve(task.id)
-
-        part_duration = 0.0
-        if completed_task.video_embedding and completed_task.video_embedding.segments:
-            for seg in completed_task.video_embedding.segments:
-                all_segments.append({
-                    "start_offset_sec": (seg.start_offset_sec + part_start_offset),
-                    "end_offset_sec": (seg.end_offset_sec + part_start_offset),
-                    "embeddings_float": seg.embeddings_float,
-                })
-            part_duration = completed_task.video_embedding.segments[-1].end_offset_sec + part_start_offset
-        total_duration = max(total_duration, part_duration)
-
-    embedding_id = f"embed_{session_id}"
-    video_id = f"video_{session_id}"
-
-    embedding_storage[embedding_id] = {
-        "filename": original_filename,
-        "segments": all_segments,
-        "duration": total_duration,
-    }
-
-    # Persist combined file for serving
-    final_video_path = str(VIDEOS_DIR / f"{session_id}.mp4")
-    try:
-        os.replace(combined_path, final_video_path)
-    except Exception:
-        # If replace fails, copy
-        with open(combined_path, "rb") as src, open(final_video_path, "wb") as dst:
-            dst.write(src.read())
-    video_path_storage[video_id] = final_video_path
-
-    # Cleanup chunks directory to save space
-    try:
-        for p in chunks_dir.glob("*"):
-            p.unlink(missing_ok=True)
-        chunks_dir.rmdir()
-    except Exception:
-        pass
-
-    return {
-        "embeddings": {"segments": all_segments},
-        "filename": original_filename,
-        "duration": total_duration,
-        "embedding_id": embedding_id,
-        "video_id": video_id,
-    }
+# Removed legacy chunking endpoints to simplify flow with Vercel Blob
 
 @app.post("/compare-local-videos")
 async def compare_local_videos(
