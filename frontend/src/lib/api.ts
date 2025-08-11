@@ -61,28 +61,15 @@ export const api = {
     const file = formData.get('file') as File;
     if (!file) throw new Error('file missing');
 
-    // Client upload via @vercel/blob/client.helper endpoint
+    // Upload to Blob via server PUT route expecting multipart/form-data
+    const fd = new FormData();
+    fd.append('file', file);
     const uploadRes = await fetch(`${API_BASE_URL}/blob/upload`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        pathname: `videos/${file.name}`,
-        contentType: file.type || 'video/mp4',
-        access: 'public',
-        multipart: true,
-        clientPayload: 'sage-video',
-      }),
+      method: 'PUT',
+      body: fd,
     });
     if (!uploadRes.ok) throw new ApiError('Failed to initiate client upload', uploadRes.status);
-    const tokenPayload = await uploadRes.json();
-    // tokenPayload contains client token info that upload() uses under the hood; however
-    // since handleUpload returns a token for client uploader, we will directly upload with fetch
-
-    // As a simple approach: use the URL returned when handleUpload completes (blob.upload-completed callback)
-    // But since it is async callback, we do a direct put fallback when needed
-    // For simplicity, retry with direct PUT
-    const putRes = await fetch(tokenPayload.url ?? tokenPayload.uploadUrl ?? '', { method: 'POST', body: file });
-    const blob = putRes.ok ? await putRes.json() : tokenPayload.blob ?? tokenPayload;
+    const blob = await uploadRes.json(); // { url, pathname, ... }
 
     const headers: Record<string, string> = {};
     const keyToUse = apiKey || localStorage.getItem('sage_api_key');
