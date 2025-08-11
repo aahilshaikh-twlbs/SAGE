@@ -74,7 +74,9 @@ export const api = {
     if (keyToUse) headers['X-API-Key'] = keyToUse;
 
     // Tell backend to ingest the blob URL
-    const ingest = await fetch(`${API_BASE_URL}/ingest-blob`, {
+    // Call backend directly to avoid Vercel function timeouts during long embedding
+    const ingestBase = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://209.38.142.207:8000';
+    const ingest = await fetch(`${ingestBase}/ingest-blob`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({ blob_url: url, filename: file.name }),

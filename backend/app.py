@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Query
+from fastapi import FastAPI, HTTPException, Request, Depends, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
@@ -74,6 +75,19 @@ async def log_requests(request: Request, call_next):
         duration = (datetime.now() - start_time).total_seconds()
         logger.error(f"{client_host} - {request.method} {path} - Error: {str(e)} ({duration:.3f}s)")
         raise
+
+# Minimal CORS to allow direct browser calls from Vercel
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://tl-sage.vercel.app",
+        "https://sage-git-main-jockey.vercel.app",
+        "https://sage.vercel.app",
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 DB_PATH = "sage.db"
 
