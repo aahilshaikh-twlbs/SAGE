@@ -5,6 +5,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   const body = (await request.json()) as HandleUploadBody;
   try {
     const jsonResponse = await handleUpload({
+      token: process.env.BLOB_READ_WRITE_TOKEN,
       request,
       body,
       onBeforeGenerateToken: async (pathname, clientPayload) => {
