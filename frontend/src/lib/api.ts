@@ -1,4 +1,5 @@
 import { ApiKeyConfig } from '@/types';
+import { upload } from '@vercel/blob/client';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -61,15 +62,12 @@ export const api = {
     const file = formData.get('file') as File;
     if (!file) throw new Error('file missing');
 
-    // Upload to Blob via server PUT route expecting multipart/form-data
-    const fd = new FormData();
-    fd.append('file', file);
-    const uploadRes = await fetch(`${API_BASE_URL}/blob/upload`, {
-      method: 'PUT',
-      body: fd,
+    // Client-side multipart upload directly to Vercel Blob (avoids 413 on Vercel functions)
+    const { url } = await upload(`videos/${file.name}`, file, {
+      access: 'public',
+      multipart: true,
+      handleUploadUrl: '/api/blob/upload',
     });
-    if (!uploadRes.ok) throw new ApiError('Failed to initiate client upload', uploadRes.status);
-    const blob = await uploadRes.json(); // { url, pathname, ... }
 
     const headers: Record<string, string> = {};
     const keyToUse = apiKey || localStorage.getItem('sage_api_key');
@@ -79,7 +77,7 @@ export const api = {
     const ingest = await fetch(`${API_BASE_URL}/ingest-blob`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({ blob_url: blob.url, filename: file.name }),
+      body: JSON.stringify({ blob_url: url, filename: file.name }),
     });
     if (!ingest.ok) throw new ApiError('Ingest failed', ingest.status);
     return ingest.json();
