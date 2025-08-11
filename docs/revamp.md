@@ -35,4 +35,4 @@
 ## Comparison Pipeline
 - Wait for complete dict/JSON objects from both videos
 - Run comparison
-- Save to RAM/cache for threshold adjustments and reruns
+- Save to RAM/cache for threshold adjustment s and reruns
