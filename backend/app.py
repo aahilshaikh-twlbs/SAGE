@@ -366,8 +366,14 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
         # Poll for completion
         all_segments: List[Dict[str, Any]] = []
         total_duration: float = 0.0
+        poll_start_time = datetime.now()
+        max_poll_duration = 60 * 60  # 1 hour max
         
         while True:
+            # Check for timeout
+            if (datetime.now() - poll_start_time).total_seconds() > max_poll_duration:
+                raise Exception(f"Timeout: TwelveLabs processing took longer than {max_poll_duration/60} minutes")
+            
             all_done = True
             for tl_task in embedding_tasks[task_id]["twelvelabs_tasks"]:
                 if tl_task["status"] == "completed":
@@ -376,9 +382,10 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                 task_status = tl.embed.task.retrieve(tl_task["id"])
                 logger.info(f"[Task {task_id}] TwelveLabs task {tl_task['id']} (part {tl_task['part_index']+1}) status: {task_status.status}")
                 
-                # Log if embeddings are already available on first check
-                if hasattr(task_status, 'video_embedding') and task_status.video_embedding and task_status.status != "ready":
+                # Only log optimization message on first check
+                if not tl_task.get("checked_before") and hasattr(task_status, 'video_embedding') and task_status.video_embedding and task_status.status == "ready":
                     logger.info(f"[Task {task_id}] TwelveLabs returned embeddings immediately for task {tl_task['id']} - possible server-side optimization")
+                tl_task["checked_before"] = True
                 
                 if task_status.status == "ready":
                     tl_task["status"] = "completed"
@@ -407,11 +414,14 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                     }
                     
                     # Check various possible error fields
-                    for attr in ['error', 'error_message', 'message', 'status_message', 'failure_reason']:
+                    for attr in ['error', 'error_message', 'message', 'status_message', 'failure_reason', 'details', 'reason']:
                         if hasattr(task_status, attr):
                             error_details[attr] = getattr(task_status, attr)
                     
+                    # Also log all attributes for debugging
+                    all_attrs = {attr: getattr(task_status, attr) for attr in dir(task_status) if not attr.startswith('_')}
                     logger.error(f"[Task {task_id}] TwelveLabs task failed with details: {error_details}")
+                    logger.error(f"[Task {task_id}] All task attributes: {all_attrs}")
                     
                     # Extract the most relevant error message
                     error_msg = (
