@@ -1,4 +1,5 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 
 const backendUrl = () => process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
@@ -51,8 +52,40 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
 export async function POST(req: NextRequest, context: RouteContext) {
   const params = await context.params;
+  const path = (params?.path || []).join('/');
+  
+  // Handle blob upload endpoint specially
+  if (path === 'blob/upload') {
+    const body = (await req.json()) as HandleUploadBody;
+    
+    try {
+      const jsonResponse = await handleUpload({
+        body,
+        request: req,
+        onBeforeGenerateToken: async (pathname, clientPayload) => {
+          return {
+            allowedContentTypes: ['video/*'],
+            maximumSizeInBytes: 5 * 1024 * 1024 * 1024, // 5GB
+            addRandomSuffix: true,
+          };
+        },
+        onUploadCompleted: async ({ blob, tokenPayload }) => {
+          console.log('blob upload completed', blob, tokenPayload);
+        },
+      });
+      
+      return NextResponse.json(jsonResponse);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 400 },
+      );
+    }
+  }
+  
+  // Regular proxy for other endpoints
   const search = req.nextUrl.search || '';
-  const target = `${backendUrl()}/${(params?.path || []).join('/')}${search}`;
+  const target = `${backendUrl()}/${path}${search}`;
   const body = await getBody(req);
   const res = await fetch(target, { method: 'POST', headers: passthroughHeaders(req.headers), body });
   return proxy(res);
