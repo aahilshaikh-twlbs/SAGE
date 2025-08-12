@@ -223,30 +223,69 @@ class BlobIngestRequest(BaseModel):
     blob_url: str
     filename: Optional[str] = None
 
+# Store for async tasks
+embedding_tasks: Dict[str, Dict[str, Any]] = {}
+
 @app.post("/ingest-blob")
 async def ingest_blob(request: BlobIngestRequest, tl: TwelveLabs = Depends(get_twelve_labs_client)):
-    """Download video from a Vercel Blob URL and generate embeddings.
-    Does not persist the video; processes from a temporary file.
+    """Start async processing of video from a Vercel Blob URL.
+    Returns immediately with a task ID that can be polled for status.
     """
+    try:
+        # Generate task ID
+        task_id = f"task_{hashlib.sha256((request.blob_url + str(datetime.now())).encode()).hexdigest()[:16]}"
+        
+        # Store initial task info
+        embedding_tasks[task_id] = {
+            "status": "starting",
+            "blob_url": request.blob_url,
+            "filename": request.filename or os.path.basename(request.blob_url),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "error": None,
+            "result": None,
+            "twelvelabs_tasks": []
+        }
+        
+        # Start async processing in background
+        import threading
+        thread = threading.Thread(
+            target=process_blob_async,
+            args=(task_id, request.blob_url, request.filename, tl)
+        )
+        thread.daemon = True
+        thread.start()
+        
+        return {
+            "task_id": task_id,
+            "status": "started",
+            "message": "Processing started. Poll /ingest-blob/status/{task_id} for updates."
+        }
+    except Exception as e:
+        logger.error(f"Error starting blob ingest: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start blob ingest: {str(e)}")
+
+
+def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl: TwelveLabs):
+    """Process blob in background thread."""
     tmp_file_path = None
     try:
+        embedding_tasks[task_id]["status"] = "downloading"
+        
         # Download blob to a temp mp4 file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
             tmp_file_path = tmp_file.name
-            with urlopen(request.blob_url) as resp:
+            with urlopen(blob_url) as resp:
                 shutil.copyfileobj(resp, tmp_file)
 
+        embedding_tasks[task_id]["status"] = "processing"
+        
         # Split if needed based on size/duration
         session_root = Path(tempfile.mkdtemp(prefix="ingest_"))
         parts_dir = session_root / "parts"
         parts = split_video_if_needed(tmp_file_path, parts_dir)
 
-        # Embed all parts and merge segments
-        all_segments: List[Dict[str, Any]] = []
-        total_duration: float = 0.0
+        # Start all embedding tasks
         for idx, part_path in enumerate(parts):
-            part_start_offset = sum(run_ffprobe_duration_seconds(p) or 0.0 for p in parts[:idx])
-
             logger.info(f"Creating embedding task for part {idx+1}/{len(parts)}: {part_path}")
             task = tl.embed.task.create(
                 model_name="Marengo-retrieval-2.7",
@@ -254,47 +293,108 @@ async def ingest_blob(request: BlobIngestRequest, tl: TwelveLabs = Depends(get_t
                 video_clip_length=2,
                 video_embedding_scopes=["clip", "video"],
             )
+            embedding_tasks[task_id]["twelvelabs_tasks"].append({
+                "id": task.id,
+                "part_index": idx,
+                "part_path": part_path,
+                "status": "processing"
+            })
 
-            def on_task_update(t: EmbeddingsTask):  # type: ignore
-                logger.info(f"Task {t.id} status: {t.status}")
+        # Poll for completion
+        all_segments: List[Dict[str, Any]] = []
+        total_duration: float = 0.0
+        
+        while True:
+            all_done = True
+            for tl_task in embedding_tasks[task_id]["twelvelabs_tasks"]:
+                if tl_task["status"] == "completed":
+                    continue
+                    
+                task_status = tl.embed.task.retrieve(tl_task["id"])
+                logger.info(f"Task {tl_task['id']} status: {task_status.status}")
+                
+                if task_status.status == "ready":
+                    tl_task["status"] = "completed"
+                    idx = tl_task["part_index"]
+                    part_start_offset = sum(run_ffprobe_duration_seconds(parts[i]) or 0.0 for i in range(idx))
+                    
+                    if task_status.video_embedding and task_status.video_embedding.segments:
+                        for seg in task_status.video_embedding.segments:
+                            all_segments.append({
+                                "start_offset_sec": seg.start_offset_sec + part_start_offset,
+                                "end_offset_sec": seg.end_offset_sec + part_start_offset,
+                                "embedding": seg.embeddings_float,
+                            })
+                        total_duration = max(total_duration, part_start_offset + task_status.video_embedding.segments[-1].end_offset_sec)
+                elif task_status.status == "failed":
+                    raise Exception(f"TwelveLabs task {tl_task['id']} failed")
+                else:
+                    all_done = False
+            
+            if all_done:
+                break
+            
+            import time
+            time.sleep(5)
 
-            task.wait_for_done(sleep_interval=5, callback=on_task_update)
-            completed_task = tl.embed.task.retrieve(task.id)
-
-            if completed_task.video_embedding and completed_task.video_embedding.segments:
-                for seg in completed_task.video_embedding.segments:
-                    all_segments.append({
-                        "start_offset_sec": seg.start_offset_sec + part_start_offset,
-                        "end_offset_sec": seg.end_offset_sec + part_start_offset,
-                        "embedding": seg.embeddings_float,
-                    })
-                total_duration = max(total_duration, part_start_offset + completed_task.video_embedding.segments[-1].end_offset_sec)
-
-        embedding_id = f"embed_{hashlib.sha256((request.blob_url).encode()).hexdigest()[:16]}"
+        # Store results
+        embedding_id = f"embed_{hashlib.sha256((blob_url).encode()).hexdigest()[:16]}"
         embedding_storage[embedding_id] = {
-            "filename": request.filename or os.path.basename(request.blob_url),
+            "filename": filename or os.path.basename(blob_url),
             "embeddings": {"segments": all_segments},
             "duration": total_duration,
             "source": "blob",
-            "blob_url": request.blob_url,
+            "blob_url": blob_url,
         }
 
-        return {
+        embedding_tasks[task_id]["status"] = "completed"
+        embedding_tasks[task_id]["result"] = {
             "embeddings": {"segments": all_segments},
-            "filename": request.filename or os.path.basename(request.blob_url),
+            "filename": filename or os.path.basename(blob_url),
             "duration": total_duration,
             "embedding_id": embedding_id,
-            "video_url": request.blob_url,
+            "video_url": blob_url,
         }
+        
+        # Cleanup parts
+        shutil.rmtree(session_root, ignore_errors=True)
+        
     except Exception as e:
-        logger.error(f"Error ingesting blob: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to ingest blob: {str(e)}")
+        logger.error(f"Error processing blob async: {e}")
+        embedding_tasks[task_id]["status"] = "failed"
+        embedding_tasks[task_id]["error"] = str(e)
     finally:
         try:
             if tmp_file_path and os.path.exists(tmp_file_path):
                 os.unlink(tmp_file_path)
         except Exception:
             pass
+
+
+@app.get("/ingest-blob/status/{task_id}")
+async def get_ingest_status(task_id: str):
+    """Get status of async blob ingest task."""
+    if task_id not in embedding_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task = embedding_tasks[task_id]
+    response = {
+        "task_id": task_id,
+        "status": task["status"],
+        "created_at": task["created_at"],
+    }
+    
+    if task["status"] == "completed" and task["result"]:
+        response.update(task["result"])
+    elif task["status"] == "failed" and task["error"]:
+        response["error"] = task["error"]
+    elif task["status"] == "processing" and task["twelvelabs_tasks"]:
+        # Include progress info
+        total = len(task["twelvelabs_tasks"])
+        completed = sum(1 for t in task["twelvelabs_tasks"] if t["status"] == "completed")
+        response["progress"] = f"{completed}/{total} parts processed"
+    
+    return response
 
 
 def run_ffprobe_duration_seconds(file_path: str) -> Optional[float]:

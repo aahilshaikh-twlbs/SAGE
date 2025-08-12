@@ -52,7 +52,7 @@ export const api = {
   },
 
   // Upload to Vercel Blob on the client, then send blob URL to backend for embedding
-  uploadAndGenerateEmbeddings: async (formData: FormData, apiKey?: string): Promise<{
+  uploadAndGenerateEmbeddings: async (formData: FormData, apiKey?: string, onProgress?: (status: string, progress?: string) => void): Promise<{
     embeddings: unknown;
     filename: string;
     duration: number;
@@ -80,8 +80,46 @@ export const api = {
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({ blob_url: url, filename: file.name }),
     });
-    if (!ingest.ok) throw new ApiError('Ingest failed', ingest.status);
-    return ingest.json();
+    if (!ingest.ok) {
+      const errorData = await ingest.json().catch(() => ({ detail: ingest.statusText }));
+      throw new ApiError(`Ingest failed: ${errorData.detail || ingest.statusText}`, ingest.status);
+    }
+    
+    const { task_id } = await ingest.json();
+    
+    // Poll for status
+    const maxWaitTime = 30 * 60 * 1000; // 30 minutes max
+    const pollInterval = 5000; // 5 seconds
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < maxWaitTime) {
+      const statusRes = await fetch(`${API_BASE_URL}/ingest-blob/status/${task_id}`, {
+        headers,
+      });
+      
+      if (!statusRes.ok) {
+        throw new ApiError('Failed to get task status', statusRes.status);
+      }
+      
+      const status = await statusRes.json();
+      console.log(`Task ${task_id} status:`, status.status, status.progress || '');
+      
+      // Call progress callback if provided
+      if (onProgress) {
+        onProgress(status.status, status.progress);
+      }
+      
+      if (status.status === 'completed') {
+        return status;
+      } else if (status.status === 'failed') {
+        throw new ApiError(`Task failed: ${status.error}`, 500);
+      }
+      
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+    }
+    
+    throw new ApiError('Task timed out after 30 minutes', 408);
   },
 
   // Compare local videos

@@ -128,20 +128,37 @@ export default function LandingPage() {
       });
       
       // Upload and generate embeddings for both videos (sequential for stability)
-      const result1 = await api.uploadAndGenerateEmbeddings(formData1).then(result => {
-        setEmbeddingProgress(prev => ({
-          ...prev,
-          [uploadedVideos[0].id]: 'Generating embeddings for video 1...'
-        }));
-        return result;
-      });
-      const result2 = await api.uploadAndGenerateEmbeddings(formData2).then(result => {
-        setEmbeddingProgress(prev => ({
-          ...prev,
-          [uploadedVideos[1].id]: 'Generating embeddings for video 2...'
-        }));
-        return result;
-      });
+      const result1 = await api.uploadAndGenerateEmbeddings(
+        formData1,
+        undefined,
+        (status, progress) => {
+          let message = 'Processing video 1...';
+          if (status === 'downloading') message = 'Downloading video 1...';
+          else if (status === 'processing' && progress) message = `Processing video 1: ${progress}`;
+          else if (status === 'starting') message = 'Starting processing for video 1...';
+          
+          setEmbeddingProgress(prev => ({
+            ...prev,
+            [uploadedVideos[0].id]: message
+          }));
+        }
+      );
+      
+      const result2 = await api.uploadAndGenerateEmbeddings(
+        formData2,
+        undefined,
+        (status, progress) => {
+          let message = 'Processing video 2...';
+          if (status === 'downloading') message = 'Downloading video 2...';
+          else if (status === 'processing' && progress) message = `Processing video 2: ${progress}`;
+          else if (status === 'starting') message = 'Starting processing for video 2...';
+          
+          setEmbeddingProgress(prev => ({
+            ...prev,
+            [uploadedVideos[1].id]: message
+          }));
+        }
+      );
       
       // Update progress
       setEmbeddingProgress({
