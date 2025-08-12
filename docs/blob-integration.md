@@ -78,16 +78,34 @@ NEXT_PUBLIC_BACKEND_URL=http://209.38.142.207:8000
 ## Setup Instructions
 
 1. **Create Vercel Blob Store**
-   - Go to Vercel Dashboard → Storage → Create Blob Store
-   - Copy the read-write token
+   - Go to Vercel Dashboard → Project → Storage tab
+   - Click "Connect Database" → Create New → Blob
+   - Name your store (e.g., "video-storage")
+   - Select environments (Production, Preview, Development)
+   - Click "Create"
+   - Copy the `BLOB_READ_WRITE_TOKEN` from the store settings
 
-2. **Configure Environment Variables**
-   - Add variables in Vercel project settings
-   - Create local `.env.local` file
+2. **Configure Environment Variables in Vercel**
+   - Go to Project Settings → Environment Variables
+   - Add these variables:
+     ```
+     BLOB_READ_WRITE_TOKEN = vercel_blob_rw_[your-token-here]
+     BACKEND_URL = http://209.38.142.207:8000
+     ```
+   - Make sure they're set for all environments you need
 
-3. **Deploy**
+3. **Configure Local Development**
+   - Create `frontend/.env.local`:
+     ```bash
+     BLOB_READ_WRITE_TOKEN=vercel_blob_rw_[your-token-here]
+     BACKEND_URL=http://209.38.142.207:8000
+     NEXT_PUBLIC_BACKEND_URL=http://209.38.142.207:8000
+     ```
+
+4. **Deploy**
    - Push changes to trigger Vercel deployment
-   - Ensure backend is accessible from Vercel servers
+   - Wait for deployment to complete
+   - Verify environment variables are loaded
 
 ## Data Flow
 
@@ -111,6 +129,11 @@ NEXT_PUBLIC_BACKEND_URL=http://209.38.142.207:8000
 - **Global CDN**: Videos served from Vercel's edge network
 
 ## Troubleshooting
+
+### 404 Not Found on /api/blob/upload
+- Ensure `BLOB_READ_WRITE_TOKEN` is set in Vercel environment variables
+- Check that the token starts with `vercel_blob_rw_`
+- Redeploy after adding environment variables
 
 ### 502 Bad Gateway
 - Ensure `BACKEND_URL` is set correctly in Vercel
