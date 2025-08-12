@@ -337,11 +337,6 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
         for idx, part_path in enumerate(parts):
             logger.info(f"[Task {task_id}] Creating TwelveLabs embedding task for part {idx+1}/{len(parts)}: {part_path}")
             
-            # Calculate video hash for potential caching
-            with open(part_path, 'rb') as f:
-                video_hash = hashlib.sha256(f.read(1024*1024)).hexdigest()[:16]  # First 1MB hash
-                logger.info(f"[Task {task_id}] Video part hash: {video_hash}")
-            
             try:
                 task = tl.embed.task.create(
                     model_name="Marengo-retrieval-2.7",
@@ -350,12 +345,19 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                     video_embedding_scopes=["clip", "video"],
                 )
                 logger.info(f"[Task {task_id}] TwelveLabs task created: {task.id}")
+                
+                # Immediately check if embeddings are ready (would indicate TL caching)
+                immediate_check = tl.embed.task.retrieve(task.id)
+                if immediate_check.status == "ready":
+                    logger.info(f"[Task {task_id}] WOW! TwelveLabs returned embeddings IMMEDIATELY for task {task.id} - they must be caching!")
+                else:
+                    logger.info(f"[Task {task_id}] Initial status: {immediate_check.status} - no immediate cache hit")
+                
                 embedding_tasks[task_id]["twelvelabs_tasks"].append({
                     "id": task.id,
                     "part_index": idx,
                     "part_path": part_path,
-                    "status": "processing",
-                    "video_hash": video_hash
+                    "status": "processing"
                 })
             except Exception as e:
                 logger.error(f"[Task {task_id}] Failed to create TwelveLabs task for part {idx+1}: {e}")
@@ -374,9 +376,9 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                 task_status = tl.embed.task.retrieve(tl_task["id"])
                 logger.info(f"[Task {task_id}] TwelveLabs task {tl_task['id']} (part {tl_task['part_index']+1}) status: {task_status.status}")
                 
-                # Check if embeddings are already available (cached)
-                if hasattr(task_status, 'video_embedding') and task_status.video_embedding:
-                    logger.info(f"[Task {task_id}] Embeddings already available for task {tl_task['id']} - may be cached!")
+                # Log if embeddings are already available on first check
+                if hasattr(task_status, 'video_embedding') and task_status.video_embedding and task_status.status != "ready":
+                    logger.info(f"[Task {task_id}] TwelveLabs returned embeddings immediately for task {tl_task['id']} - possible server-side optimization")
                 
                 if task_status.status == "ready":
                     tl_task["status"] = "completed"
@@ -398,7 +400,29 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                             })
                         total_duration = max(total_duration, part_start_offset + task_status.video_embedding.segments[-1].end_offset_sec)
                 elif task_status.status == "failed":
-                    raise Exception(f"TwelveLabs task {tl_task['id']} failed")
+                    # Log all available error information
+                    error_details = {
+                        "task_id": tl_task['id'],
+                        "status": task_status.status,
+                    }
+                    
+                    # Check various possible error fields
+                    for attr in ['error', 'error_message', 'message', 'status_message', 'failure_reason']:
+                        if hasattr(task_status, attr):
+                            error_details[attr] = getattr(task_status, attr)
+                    
+                    logger.error(f"[Task {task_id}] TwelveLabs task failed with details: {error_details}")
+                    
+                    # Extract the most relevant error message
+                    error_msg = (
+                        error_details.get('error_message') or 
+                        error_details.get('error') or 
+                        error_details.get('message') or 
+                        error_details.get('failure_reason') or
+                        'Unknown error'
+                    )
+                    
+                    raise Exception(f"TwelveLabs task {tl_task['id']} failed: {error_msg}")
                 else:
                     all_done = False
             
