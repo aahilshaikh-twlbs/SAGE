@@ -329,23 +329,37 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
         # Split if needed based on size/duration
         session_root = Path(tempfile.mkdtemp(prefix="ingest_"))
         parts_dir = session_root / "parts"
+        logger.info(f"[Task {task_id}] Checking if video needs splitting...")
         parts = split_video_if_needed(tmp_file_path, parts_dir)
+        logger.info(f"[Task {task_id}] Video split into {len(parts)} part(s)")
 
         # Start all embedding tasks
         for idx, part_path in enumerate(parts):
-            logger.info(f"Creating embedding task for part {idx+1}/{len(parts)}: {part_path}")
-            task = tl.embed.task.create(
-                model_name="Marengo-retrieval-2.7",
-                video_file=part_path,
-                video_clip_length=2,
-                video_embedding_scopes=["clip", "video"],
-            )
-            embedding_tasks[task_id]["twelvelabs_tasks"].append({
-                "id": task.id,
-                "part_index": idx,
-                "part_path": part_path,
-                "status": "processing"
-            })
+            logger.info(f"[Task {task_id}] Creating TwelveLabs embedding task for part {idx+1}/{len(parts)}: {part_path}")
+            
+            # Calculate video hash for potential caching
+            with open(part_path, 'rb') as f:
+                video_hash = hashlib.sha256(f.read(1024*1024)).hexdigest()[:16]  # First 1MB hash
+                logger.info(f"[Task {task_id}] Video part hash: {video_hash}")
+            
+            try:
+                task = tl.embed.task.create(
+                    model_name="Marengo-retrieval-2.7",
+                    video_file=part_path,
+                    video_clip_length=2,
+                    video_embedding_scopes=["clip", "video"],
+                )
+                logger.info(f"[Task {task_id}] TwelveLabs task created: {task.id}")
+                embedding_tasks[task_id]["twelvelabs_tasks"].append({
+                    "id": task.id,
+                    "part_index": idx,
+                    "part_path": part_path,
+                    "status": "processing",
+                    "video_hash": video_hash
+                })
+            except Exception as e:
+                logger.error(f"[Task {task_id}] Failed to create TwelveLabs task for part {idx+1}: {e}")
+                raise
 
         # Poll for completion
         all_segments: List[Dict[str, Any]] = []
@@ -358,10 +372,20 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                     continue
                     
                 task_status = tl.embed.task.retrieve(tl_task["id"])
-                logger.info(f"Task {tl_task['id']} status: {task_status.status}")
+                logger.info(f"[Task {task_id}] TwelveLabs task {tl_task['id']} (part {tl_task['part_index']+1}) status: {task_status.status}")
+                
+                # Check if embeddings are already available (cached)
+                if hasattr(task_status, 'video_embedding') and task_status.video_embedding:
+                    logger.info(f"[Task {task_id}] Embeddings already available for task {tl_task['id']} - may be cached!")
                 
                 if task_status.status == "ready":
                     tl_task["status"] = "completed"
+                    completed_parts = sum(1 for t in embedding_tasks[task_id]['twelvelabs_tasks'] if t['status'] == 'completed')
+                    total_parts = len(embedding_tasks[task_id]['twelvelabs_tasks'])
+                    logger.info(f"[Task {task_id}] Part {tl_task['part_index']+1} completed. Progress: {completed_parts}/{total_parts}")
+                    
+                    # Update progress in task
+                    embedding_tasks[task_id]["progress"] = f"{completed_parts}/{total_parts} parts processed"
                     idx = tl_task["part_index"]
                     part_start_offset = sum(run_ffprobe_duration_seconds(parts[i]) or 0.0 for i in range(idx))
                     
@@ -440,6 +464,15 @@ async def get_ingest_status(task_id: str):
         total = len(task["twelvelabs_tasks"])
         completed = sum(1 for t in task["twelvelabs_tasks"] if t["status"] == "completed")
         response["progress"] = f"{completed}/{total} parts processed"
+        
+        # Add estimated time remaining if we have progress
+        if completed > 0:
+            elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(task["created_at"])).total_seconds()
+            avg_time_per_part = elapsed / completed
+            remaining_parts = total - completed
+            estimated_remaining_seconds = remaining_parts * avg_time_per_part
+            response["estimated_remaining_seconds"] = int(estimated_remaining_seconds)
+            response["elapsed_seconds"] = int(elapsed)
     
     return response
 

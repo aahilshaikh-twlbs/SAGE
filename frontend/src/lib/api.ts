@@ -62,12 +62,34 @@ export const api = {
     const file = formData.get('file') as File;
     if (!file) throw new Error('file missing');
 
-    // Client-side multipart upload directly to Vercel Blob (avoids 413 on Vercel functions)
-    const { url } = await upload(`videos/${file.name}`, file, {
-      access: 'public',
-      multipart: true,
-      handleUploadUrl: '/api/blob/upload',
-    });
+    console.log(`[Blob Upload] Starting upload for ${file.name} (${(file.size / (1024*1024)).toFixed(2)} MB)`);
+    
+    let url: string;
+    try {
+      // Client-side multipart upload directly to Vercel Blob (avoids 413 on Vercel functions)
+      const result = await upload(`videos/${file.name}`, file, {
+        access: 'public',
+        multipart: file.size > 300 * 1024 * 1024, // Use multipart for files > 300MB
+        handleUploadUrl: '/api/blob/upload',
+        onUploadProgress: ({ percentage }) => {
+          console.log(`[Blob Upload] Progress: ${percentage}%`);
+          if (onProgress) {
+            onProgress('uploading', `${percentage}%`);
+          }
+        },
+      });
+      url = result.url;
+      console.log(`[Blob Upload] Completed. URL: ${url}`);
+    } catch (uploadError) {
+      console.error('[Blob Upload] Failed:', uploadError);
+      // Provide more detailed error info
+      const errorMessage = uploadError instanceof Error 
+        ? uploadError.message 
+        : typeof uploadError === 'object' && uploadError !== null
+          ? JSON.stringify(uploadError)
+          : String(uploadError);
+      throw new ApiError(`Blob upload failed: ${errorMessage}`, 500);
+    }
 
     const headers: Record<string, string> = {};
     const keyToUse = apiKey || localStorage.getItem('sage_api_key');
@@ -92,21 +114,35 @@ export const api = {
     const pollInterval = 5000; // 5 seconds
     const startTime = Date.now();
     
+    console.log(`[Polling] Starting to poll task ${task_id}`);
+    
     while (Date.now() - startTime < maxWaitTime) {
-      const statusRes = await fetch(`${API_BASE_URL}/ingest-blob/status/${task_id}`, {
-        headers,
-      });
-      
-      if (!statusRes.ok) {
-        throw new ApiError('Failed to get task status', statusRes.status);
-      }
+      try {
+        const statusRes = await fetch(`${API_BASE_URL}/ingest-blob/status/${task_id}`, {
+          headers,
+          // Add timeout to prevent hanging requests
+          signal: AbortSignal.timeout(10000), // 10 second timeout per request
+        });
+        
+        if (!statusRes.ok) {
+          console.error(`[Polling] Status request failed: ${statusRes.status}`);
+          throw new ApiError('Failed to get task status', statusRes.status);
+        }
       
       const status = await statusRes.json();
       console.log(`Task ${task_id} status:`, status.status, status.progress || '');
       
+      // Add time estimates to progress message
+      let progressMessage = status.progress || '';
+      if (status.estimated_remaining_seconds) {
+        const minutes = Math.floor(status.estimated_remaining_seconds / 60);
+        const seconds = status.estimated_remaining_seconds % 60;
+        progressMessage += ` (est. ${minutes}m ${seconds}s remaining)`;
+      }
+      
       // Call progress callback if provided
       if (onProgress) {
-        onProgress(status.status, status.progress);
+        onProgress(status.status, progressMessage);
       }
       
       if (status.status === 'completed') {
@@ -115,8 +151,21 @@ export const api = {
         throw new ApiError(`Task failed: ${status.error}`, 500);
       }
       
-      // Wait before next poll
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      } catch (error) {
+        console.error('[Polling] Error during status check:', error);
+        
+        // If it's a network error or timeout, continue polling
+        if (error instanceof TypeError || (error instanceof Error && error.name === 'AbortError')) {
+          console.log('[Polling] Network error, continuing to poll...');
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          continue;
+        }
+        
+        // For other errors, re-throw
+        throw error;
+      }
     }
     
     throw new ApiError('Task timed out after 30 minutes', 408);
