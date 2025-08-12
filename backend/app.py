@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 import logging
 import sqlite3
 from twelvelabs import TwelveLabs
+import pytz
 from twelvelabs.models.embed import EmbeddingsTask
 import hashlib
 import numpy as np
@@ -18,13 +19,27 @@ import subprocess
 import shutil
 from urllib.request import urlopen
 
-# Configure logging with timestamps
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+# Configure logging with PST timestamps
+class PSTFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        # Convert to PST
+        pst = pytz.timezone('US/Pacific')
+        dt = datetime.fromtimestamp(record.created, tz=pytz.UTC)
+        pst_time = dt.astimezone(pst)
+        if datefmt:
+            return pst_time.strftime(datefmt)
+        return pst_time.strftime('%Y-%m-%d %H:%M:%S PST')
+
+# Set up logger with PST formatter
 logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+formatter = PSTFormatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S PST'
+)
+handler.setFormatter(formatter)
+logger.handlers = [handler]
+logger.setLevel(logging.INFO)
 
 app = FastAPI(title="SAGE Backend", version="2.0.0")
 
@@ -270,12 +285,44 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
     tmp_file_path = None
     try:
         embedding_tasks[task_id]["status"] = "downloading"
+        logger.info(f"[Task {task_id}] Starting download from Vercel Blob: {filename or 'unnamed'}")
+        logger.info(f"[Task {task_id}] Blob URL: {blob_url[:100]}...")  # Log first 100 chars of URL
         
         # Download blob to a temp mp4 file
+        download_start = datetime.now()
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
             tmp_file_path = tmp_file.name
             with urlopen(blob_url) as resp:
-                shutil.copyfileobj(resp, tmp_file)
+                # Get content length if available
+                content_length = resp.headers.get('Content-Length')
+                if content_length:
+                    logger.info(f"[Task {task_id}] Downloading {int(content_length) / (1024*1024):.2f} MB")
+                
+                # Download with progress logging
+                downloaded = 0
+                chunk_size = 1024 * 1024  # 1MB chunks
+                last_log = download_start
+                
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    tmp_file.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    # Log progress every 5 seconds
+                    now = datetime.now()
+                    if (now - last_log).total_seconds() > 5:
+                        if content_length:
+                            progress = (downloaded / int(content_length)) * 100
+                            logger.info(f"[Task {task_id}] Download progress: {progress:.1f}% ({downloaded / (1024*1024):.1f} MB)")
+                        else:
+                            logger.info(f"[Task {task_id}] Downloaded: {downloaded / (1024*1024):.1f} MB")
+                        last_log = now
+        
+        download_duration = (datetime.now() - download_start).total_seconds()
+        file_size = os.path.getsize(tmp_file_path) / (1024*1024)  # MB
+        logger.info(f"[Task {task_id}] Download completed: {file_size:.2f} MB in {download_duration:.1f}s ({file_size/download_duration:.1f} MB/s)")
 
         embedding_tasks[task_id]["status"] = "processing"
         
