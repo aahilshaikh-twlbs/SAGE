@@ -56,12 +56,20 @@ export async function POST(req: NextRequest, context: RouteContext) {
   
   // Handle blob upload endpoint specially
   if (path === 'blob/upload') {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      return NextResponse.json(
+        { error: 'BLOB_READ_WRITE_TOKEN not configured' },
+        { status: 500 },
+      );
+    }
+    
     const body = (await req.json()) as HandleUploadBody;
     
     try {
       const jsonResponse = await handleUpload({
         body,
         request: req,
+        token: process.env.BLOB_READ_WRITE_TOKEN,
         onBeforeGenerateToken: async (pathname, clientPayload) => {
           return {
             allowedContentTypes: ['video/*'],
