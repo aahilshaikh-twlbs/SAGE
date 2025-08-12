@@ -56,9 +56,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
   
   // Handle blob upload endpoint specially
   if (path === 'blob/upload') {
+    console.log('Handling blob upload request');
+    console.log('Token exists:', !!process.env.BLOB_READ_WRITE_TOKEN);
+    
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return NextResponse.json(
-        { error: 'BLOB_READ_WRITE_TOKEN not configured' },
+        { error: 'BLOB_READ_WRITE_TOKEN not configured. Please set it in Vercel environment variables.' },
         { status: 500 },
       );
     }
