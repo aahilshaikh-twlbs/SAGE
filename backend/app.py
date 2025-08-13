@@ -663,9 +663,9 @@ async def compare_local_videos(
             emb1 = embed_data1["embeddings"]
             if hasattr(emb1, "segments"):
                 segments1 = [{
-                    "start_offset_sec": seg.start_offset_sec,
-                    "end_offset_sec": seg.end_offset_sec,
-                    "embedding": seg.embeddings_float
+                "start_offset_sec": seg.start_offset_sec,
+                "end_offset_sec": seg.end_offset_sec,
+                "embedding": seg.embeddings_float
                 } for seg in emb1.segments]
             elif isinstance(emb1, dict) and isinstance(emb1.get("segments"), list):
                 segments1 = [{
@@ -678,9 +678,9 @@ async def compare_local_videos(
             emb2 = embed_data2["embeddings"]
             if hasattr(emb2, "segments"):
                 segments2 = [{
-                    "start_offset_sec": seg.start_offset_sec,
-                    "end_offset_sec": seg.end_offset_sec,
-                    "embedding": seg.embeddings_float
+                "start_offset_sec": seg.start_offset_sec,
+                "end_offset_sec": seg.end_offset_sec,
+                "embedding": seg.embeddings_float
                 } for seg in emb2.segments]
             elif isinstance(emb2, dict) and isinstance(emb2.get("segments"), list):
                 segments2 = [{
@@ -764,7 +764,7 @@ async def serve_video(video_id: str):
         return FileResponse(path, media_type="video/mp4")
     if video_id in video_storage:
         return Response(content=video_storage[video_id], media_type="video/mp4")
-    raise HTTPException(status_code=404, detail="Video not found")
+        raise HTTPException(status_code=404, detail="Video not found")
 
 # Custom 404 handler
 @app.exception_handler(404)
