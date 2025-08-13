@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 import subprocess
 import shutil
+import json
 from urllib.request import urlopen
 
 # Configure logging with PST timestamps
@@ -345,6 +346,37 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
         for idx, part_path in enumerate(parts):
             logger.info(f"[Task {task_id}] Creating TwelveLabs embedding task for part {idx+1}/{len(parts)}: {part_path}")
             
+            # Get video properties for validation
+            try:
+                probe_cmd = [
+                    'ffprobe', '-v', 'error',
+                    '-select_streams', 'v:0',
+                    '-show_entries', 'stream=width,height,r_frame_rate,codec_name',
+                    '-show_entries', 'format=duration',
+                    '-of', 'json',
+                    part_path
+                ]
+                probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
+                probe_data = json.loads(probe_result.stdout)
+                
+                if probe_data.get('streams'):
+                    stream = probe_data['streams'][0]
+                    width = stream.get('width', 0)
+                    height = stream.get('height', 0)
+                    codec = stream.get('codec_name', 'unknown')
+                    logger.info(f"[Task {task_id}] Video properties: {width}x{height}, codec: {codec}")
+                    
+                    # Validate resolution
+                    if width < 360 or height < 360:
+                        raise Exception(f"Video resolution too low: {width}x{height} (minimum 360x360)")
+                    if width > 3840 or height > 2160:
+                        raise Exception(f"Video resolution too high: {width}x{height} (maximum 3840x2160)")
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"[Task {task_id}] Could not probe video properties: {e}")
+            except Exception as e:
+                logger.error(f"[Task {task_id}] Video validation failed: {e}")
+                raise
+            
             try:
                 task = tl.embed.task.create(
                     model_name="Marengo-retrieval-2.7",
@@ -456,6 +488,8 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                     
                     # Extract the most relevant error message
                     error_msg = (
+                        error_details.get('error_meaning') or
+                        error_details.get('embedding_error') or
                         error_details.get('error_message') or 
                         error_details.get('error') or 
                         error_details.get('message') or 
@@ -463,7 +497,12 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                         'Unknown error'
                     )
                     
-                    raise Exception(f"TwelveLabs task {tl_task['id']} failed: {error_msg}")
+                    # Include all error details in the exception for better debugging
+                    detailed_error = f"TwelveLabs task {tl_task['id']} failed: {error_msg}"
+                    if len(error_details) > 2:  # More than just task_id and status
+                        detailed_error += f" (Details: {json.dumps(error_details)})"
+                    
+                    raise Exception(detailed_error)
                 else:
                     all_done = False
             
