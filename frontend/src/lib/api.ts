@@ -110,7 +110,7 @@ export const api = {
     const { task_id } = await ingest.json();
     
     // Poll for status
-    const maxWaitTime = 30 * 60 * 1000; // 30 minutes max
+    const maxWaitTime = 120 * 60 * 1000; // 2 hours max (TwelveLabs can take a while)
     const pollInterval = 5000; // 5 seconds
     const startTime = Date.now();
     
@@ -168,7 +168,7 @@ export const api = {
       }
     }
     
-    throw new ApiError('Task timed out after 30 minutes', 408);
+    throw new ApiError('Task timed out after 2 hours', 408);
   },
 
   // Compare local videos
