@@ -321,9 +321,17 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                         last_log = now
         
         download_duration = (datetime.now() - download_start).total_seconds()
-        file_size = os.path.getsize(tmp_file_path) / (1024*1024)  # MB
-        logger.info(f"[Task {task_id}] Download completed: {file_size:.2f} MB in {download_duration:.1f}s ({file_size/download_duration:.1f} MB/s)")
+        file_size_bytes = os.path.getsize(tmp_file_path)
+        file_size_mb = file_size_bytes / (1024*1024)  # MB
+        logger.info(f"[Task {task_id}] Download completed: {file_size_mb:.2f} MB in {download_duration:.1f}s ({file_size_mb/download_duration:.1f} MB/s)")
 
+        # Validate downloaded file
+        if file_size_bytes == 0:
+            raise Exception("Downloaded video file is empty")
+        
+        # Log file details for debugging
+        logger.info(f"[Task {task_id}] Video file details: path={tmp_file_path}, size={file_size_bytes} bytes")
+        
         embedding_tasks[task_id]["status"] = "processing"
         
         # Split if needed based on size/duration
@@ -418,10 +426,33 @@ def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl:
                         if hasattr(task_status, attr):
                             error_details[attr] = getattr(task_status, attr)
                     
-                    # Also log all attributes for debugging
-                    all_attrs = {attr: getattr(task_status, attr) for attr in dir(task_status) if not attr.startswith('_')}
+                    # Check video_embedding for error details
+                    if hasattr(task_status, 'video_embedding') and task_status.video_embedding:
+                        if hasattr(task_status.video_embedding, 'error_message') and task_status.video_embedding.error_message:
+                            error_details['embedding_error'] = task_status.video_embedding.error_message
+                        if hasattr(task_status.video_embedding, 'metadata') and task_status.video_embedding.metadata:
+                            metadata = task_status.video_embedding.metadata
+                            error_details['input_filename'] = getattr(metadata, 'input_filename', None)
+                            error_details['input_url'] = getattr(metadata, 'input_url', None)
+                    
+                    # Check for specific error codes
+                    error_code_meanings = {
+                        'video_resolution_too_low': 'Video resolution is below 360x360 pixels',
+                        'video_resolution_too_high': 'Video resolution exceeds 3840x2160 pixels',
+                        'video_duration_too_short': 'Video is shorter than 10 seconds',
+                        'video_duration_too_long': 'Video is longer than 2 hours',
+                        'video_file_broken': 'Video file is corrupted or unreadable'
+                    }
+                    
+                    # Check if any error field contains known error codes
+                    for field, value in error_details.items():
+                        if value and isinstance(value, str):
+                            for code, meaning in error_code_meanings.items():
+                                if code in value:
+                                    error_details['error_meaning'] = meaning
+                                    break
+                    
                     logger.error(f"[Task {task_id}] TwelveLabs task failed with details: {error_details}")
-                    logger.error(f"[Task {task_id}] All task attributes: {all_attrs}")
                     
                     # Extract the most relevant error message
                     error_msg = (
