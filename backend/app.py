@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SAGE Backend", version="2.0.0")
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to verify backend is running"""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -82,7 +87,15 @@ async def log_requests(request: Request, call_next):
     except Exception as e:
         duration = (datetime.now() - start_time).total_seconds()
         logger.error(f"{client_host} - {request.method} {path} - Error: {str(e)} ({duration:.3f}s)")
-        raise
+        # Return a proper error response instead of raising
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal Server Error",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 DB_PATH = "sage.db"
 
@@ -210,6 +223,25 @@ async def validate_api_key(request: ApiKeyValidation):
 async def upload_and_generate_embeddings(
     file: UploadFile = File(...),
     tl: TwelveLabs = Depends(get_twelve_labs_client)
+):
+    # Set a longer timeout for this endpoint
+    import asyncio
+    try:
+        # Set a timeout of 5 minutes for the entire operation
+        return await asyncio.wait_for(
+            _process_upload_and_embeddings(file, tl),
+            timeout=300.0  # 5 minutes
+        )
+    except asyncio.TimeoutError:
+        logger.error("Upload and embedding generation timed out after 5 minutes")
+        raise HTTPException(status_code=408, detail="Request timed out - embedding generation took too long")
+    except Exception as e:
+        logger.error(f"Error in upload_and_generate_embeddings: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process upload: {str(e)}")
+
+async def _process_upload_and_embeddings(
+    file: UploadFile,
+    tl: TwelveLabs
 ):
     try:
         content = await file.read()
@@ -389,4 +421,10 @@ async def custom_404_handler(request: Request, exc):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        timeout_keep_alive=300,  # 5 minutes keep-alive
+        timeout_graceful_shutdown=300  # 5 minutes graceful shutdown
+    )
