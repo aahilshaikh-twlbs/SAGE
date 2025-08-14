@@ -41,9 +41,6 @@ export default function LandingPage() {
         }
       } catch (error) {
         console.error('Error checking stored API key:', error);
-        // Clear invalid key on any error
-        localStorage.removeItem('sage_api_key');
-        setShowApiKeyConfig(true);
       } finally {
         setIsLoading(false);
       }
@@ -175,23 +172,7 @@ export default function LandingPage() {
       window.location.href = '/analysis';
     } catch (error) {
       console.error('Error generating embeddings:', error);
-      
-      // Handle specific error cases
-      if (error instanceof Error) {
-        if (error.message.includes('API key is invalid') || error.message.includes('API key is required')) {
-          setError('Invalid or expired API key. Please enter a valid key.');
-          setShowApiKeyConfig(true);
-          localStorage.removeItem('sage_api_key');
-          setApiKey('');
-        } else if (error.message.includes('Upload failed')) {
-          setError('Upload failed. Please check your API key and try again.');
-        } else {
-          setError(`Failed to process videos: ${error.message}`);
-        }
-      } else {
-        setError('Failed to process videos. Please try again.');
-      }
-      
+      setError('Failed to process videos. Please try again.');
       setEmbeddingProgress({});
     } finally {
       setIsGeneratingEmbeddings(false);

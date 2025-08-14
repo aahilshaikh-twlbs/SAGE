@@ -50,7 +50,7 @@ export const api = {
     }, key);
   },
 
-  // Upload video and generate embeddings - UPDATED VERSION
+  // Upload video and generate embeddings
   uploadAndGenerateEmbeddings: async (formData: FormData, apiKey?: string): Promise<{
     embeddings: unknown;
     filename: string;
@@ -60,21 +60,9 @@ export const api = {
   }> => {
     const headers: Record<string, string> = {};
     const keyToUse = apiKey || localStorage.getItem('sage_api_key');
-    
-    if (!keyToUse) {
-      throw new ApiError('API key is required for upload', 401);
+    if (keyToUse) {
+      headers['X-API-Key'] = keyToUse;
     }
-    
-    // Validate API key before upload
-    try {
-      await api.validateApiKey(keyToUse);
-    } catch (error) {
-      // Clear invalid key from localStorage
-      localStorage.removeItem('sage_api_key');
-      throw new ApiError('Invalid or expired API key. Please enter a valid key.', 401);
-    }
-    
-    headers['X-API-Key'] = keyToUse;
     // Don't set Content-Type for FormData - let browser set it with boundary
 
     const response = await fetch(`${API_BASE_URL}/upload-and-generate-embeddings`, {
@@ -85,13 +73,6 @@ export const api = {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-      
-      // Handle specific error cases
-      if (response.status === 500 && errorData.detail?.includes('api_key_invalid')) {
-        localStorage.removeItem('sage_api_key');
-        throw new ApiError('API key is invalid or expired. Please enter a valid key.', 401);
-      }
-      
       throw new ApiError(`Upload failed: ${errorData.detail || response.statusText}`, response.status);
     }
 
