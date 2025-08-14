@@ -24,13 +24,14 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SAGE Backend", version="2.0.0")
 
+import os
+
+# Get CORS origins from environment variable or use defaults
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,https://tl-sage.vercel.app,http://209.38.142.207:8000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://tl-sage.vercel.app",
-        "http://209.38.142.207:8000"
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

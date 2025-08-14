@@ -21,7 +21,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://209.38.142.207:8000/:path*',
+        destination: process.env.NEXT_PUBLIC_API_URL + '/:path*',
       },
     ];
   },
