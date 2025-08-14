@@ -104,7 +104,7 @@ conn.close()
 
 # S3 Configuration
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "tl-sage-bucket")
-S3_REGION = os.getenv("S3_REGION", "us-west-2")  # Changed to match your SSO region
+S3_REGION = os.getenv("S3_REGION", "us-east-2")  # Fixed: bucket is actually in us-east-2
 S3_PROFILE = os.getenv("S3_PROFILE", "dev")  # Use the dev profile
 
 # Initialize S3 client using AWS profile
