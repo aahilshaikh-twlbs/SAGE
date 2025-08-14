@@ -1,5 +1,4 @@
 import { ApiKeyConfig } from '@/types';
-import { upload } from '@vercel/blob/client';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -51,124 +50,33 @@ export const api = {
     }, key);
   },
 
-  // Upload to Vercel Blob on the client, then send blob URL to backend for embedding
-  uploadAndGenerateEmbeddings: async (formData: FormData, apiKey?: string, onProgress?: (status: string, progress?: string) => void): Promise<{
+  // Upload video and generate embeddings
+  uploadAndGenerateEmbeddings: async (formData: FormData, apiKey?: string): Promise<{
     embeddings: unknown;
     filename: string;
     duration: number;
     embedding_id: string;
-    video_url: string;
+    video_id: string;
   }> => {
-    const file = formData.get('file') as File;
-    if (!file) throw new Error('file missing');
-
-    console.log(`[Blob Upload] Starting upload for ${file.name} (${(file.size / (1024*1024)).toFixed(2)} MB)`);
-    
-    let url: string;
-    try {
-      // Client-side multipart upload directly to Vercel Blob (avoids 413 on Vercel functions)
-      const result = await upload(`videos/${file.name}`, file, {
-        access: 'public',
-        multipart: file.size > 300 * 1024 * 1024, // Use multipart for files > 300MB
-        handleUploadUrl: '/api/blob/upload',
-        onUploadProgress: ({ percentage }) => {
-          console.log(`[Blob Upload] Progress: ${percentage}%`);
-          if (onProgress) {
-            onProgress('uploading', `${percentage}%`);
-          }
-        },
-      });
-      url = result.url;
-      console.log(`[Blob Upload] Completed. URL: ${url}`);
-    } catch (uploadError) {
-      console.error('[Blob Upload] Failed:', uploadError);
-      // Provide more detailed error info
-      const errorMessage = uploadError instanceof Error 
-        ? uploadError.message 
-        : typeof uploadError === 'object' && uploadError !== null
-          ? JSON.stringify(uploadError)
-          : String(uploadError);
-      throw new ApiError(`Blob upload failed: ${errorMessage}`, 500);
-    }
-
     const headers: Record<string, string> = {};
     const keyToUse = apiKey || localStorage.getItem('sage_api_key');
-    if (keyToUse) headers['X-API-Key'] = keyToUse;
+    if (keyToUse) {
+      headers['X-API-Key'] = keyToUse;
+    }
+    // Don't set Content-Type for FormData - let browser set it with boundary
 
-    // Tell backend to ingest the blob URL
-    // Call via Vercel rewrite to avoid mixed content (HTTPS)
-    const ingest = await fetch(`${API_BASE_URL}/ingest-blob`, {
+    const response = await fetch(`${API_BASE_URL}/upload-and-generate-embeddings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({ blob_url: url, filename: file.name }),
+      headers,
+      body: formData,
     });
-    if (!ingest.ok) {
-      const errorData = await ingest.json().catch(() => ({ detail: ingest.statusText }));
-      throw new ApiError(`Ingest failed: ${errorData.detail || ingest.statusText}`, ingest.status);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new ApiError(`Upload failed: ${errorData.detail || response.statusText}`, response.status);
     }
-    
-    const { task_id } = await ingest.json();
-    
-    // Poll for status
-    const maxWaitTime = 120 * 60 * 1000; // 2 hours max (TwelveLabs can take a while)
-    const pollInterval = 5000; // 5 seconds
-    const startTime = Date.now();
-    
-    console.log(`[Polling] Starting to poll task ${task_id}`);
-    
-    while (Date.now() - startTime < maxWaitTime) {
-      try {
-        const statusRes = await fetch(`${API_BASE_URL}/ingest-blob/status/${task_id}`, {
-          headers,
-          // Add timeout to prevent hanging requests
-          signal: AbortSignal.timeout(10000), // 10 second timeout per request
-        });
-        
-        if (!statusRes.ok) {
-          console.error(`[Polling] Status request failed: ${statusRes.status}`);
-          throw new ApiError('Failed to get task status', statusRes.status);
-        }
-      
-      const status = await statusRes.json();
-      console.log(`Task ${task_id} status:`, status.status, status.progress || '');
-      
-      // Add time estimates to progress message
-      let progressMessage = status.progress || '';
-      if (status.estimated_remaining_seconds) {
-        const minutes = Math.floor(status.estimated_remaining_seconds / 60);
-        const seconds = status.estimated_remaining_seconds % 60;
-        progressMessage += ` (est. ${minutes}m ${seconds}s remaining)`;
-      }
-      
-      // Call progress callback if provided
-      if (onProgress) {
-        onProgress(status.status, progressMessage);
-      }
-      
-      if (status.status === 'completed') {
-        return status;
-      } else if (status.status === 'failed') {
-        throw new ApiError(`Task failed: ${status.error}`, 500);
-      }
-      
-        // Wait before next poll
-        await new Promise(resolve => setTimeout(resolve, pollInterval));
-      } catch (error) {
-        console.error('[Polling] Error during status check:', error);
-        
-        // If it's a network error or timeout, continue polling
-        if (error instanceof TypeError || (error instanceof Error && error.name === 'AbortError')) {
-          console.log('[Polling] Network error, continuing to poll...');
-          await new Promise(resolve => setTimeout(resolve, pollInterval));
-          continue;
-        }
-        
-        // For other errors, re-throw
-        throw error;
-      }
-    }
-    
-    throw new ApiError('Task timed out after 2 hours', 408);
+
+    return response.json();
   },
 
   // Compare local videos

@@ -8,10 +8,8 @@ __pycache__/
 *.mp4
 *.env
 test_vids/
-*.db
+backend/sage.db
 backend/server.log
-backend/uploads
-backend/videos
 
 ############################
 # FRONTEND

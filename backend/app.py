@@ -1,12 +1,11 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 import logging
 import sqlite3
 from twelvelabs import TwelveLabs
-import pytz
 from twelvelabs.models.embed import EmbeddingsTask
 import hashlib
 import numpy as np
@@ -14,35 +13,28 @@ import tempfile
 import os
 from datetime import datetime, timezone
 import sys
-from pathlib import Path
-import subprocess
-import shutil
-import json
-from urllib.request import urlopen
 
-# Configure logging with PST timestamps
-class PSTFormatter(logging.Formatter):
-    def formatTime(self, record, datefmt=None):
-        # Convert to PST
-        pst = pytz.timezone('US/Pacific')
-        dt = datetime.fromtimestamp(record.created, tz=pytz.UTC)
-        pst_time = dt.astimezone(pst)
-        if datefmt:
-            return pst_time.strftime(datefmt)
-        return pst_time.strftime('%Y-%m-%d %H:%M:%S PST')
-
-# Set up logger with PST formatter
-logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-formatter = PSTFormatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S PST'
+# Configure logging with timestamps
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
-handler.setFormatter(formatter)
-logger.handlers = [handler]
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="SAGE Backend", version="2.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://tl-sage.vercel.app",
+        "http://209.38.142.207:8000"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Middleware to log all incoming requests with timestamps
 @app.middleware("http")
@@ -92,19 +84,6 @@ async def log_requests(request: Request, call_next):
         logger.error(f"{client_host} - {request.method} {path} - Error: {str(e)} ({duration:.3f}s)")
         raise
 
-# Minimal CORS to allow direct browser calls from Vercel
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://tl-sage.vercel.app",
-        "https://sage-git-main-jockey.vercel.app",
-        "https://sage.vercel.app",
-    ],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"]
-)
-
 DB_PATH = "sage.db"
 
 # Initialize database
@@ -124,14 +103,6 @@ current_api_key = None
 tl_client = None
 embedding_storage: Dict[str, Any] = {}
 video_storage: Dict[str, bytes] = {}
-video_path_storage: Dict[str, str] = {}
-
-BASE_DIR = Path(__file__).resolve().parent
-VIDEOS_DIR = BASE_DIR / "videos"
-VIDEOS_DIR.mkdir(exist_ok=True)
-
-MAX_EMBED_DURATION_SEC = 7200  # 2 hours
-MAX_EMBED_SIZE_BYTES = 2 * 1024 * 1024 * 1024  # 2GB
 
 # Track server start time
 server_start_time = datetime.now(timezone.utc)
@@ -235,412 +206,63 @@ async def validate_api_key(request: ApiKeyValidation):
         logger.error(f"API key validation failed: {e}")
         return ApiKeyResponse(key=request.key, isValid=False)
 
-class BlobIngestRequest(BaseModel):
-    blob_url: str
-    filename: Optional[str] = None
-
-# Store for async tasks
-embedding_tasks: Dict[str, Dict[str, Any]] = {}
-
-@app.post("/ingest-blob")
-async def ingest_blob(request: BlobIngestRequest, tl: TwelveLabs = Depends(get_twelve_labs_client)):
-    """Start async processing of video from a Vercel Blob URL.
-    Returns immediately with a task ID that can be polled for status.
-    """
+@app.post("/upload-and-generate-embeddings")
+async def upload_and_generate_embeddings(
+    file: UploadFile = File(...),
+    tl: TwelveLabs = Depends(get_twelve_labs_client)
+):
     try:
-        # Generate task ID
-        task_id = f"task_{hashlib.sha256((request.blob_url + str(datetime.now())).encode()).hexdigest()[:16]}"
+        content = await file.read()
         
-        # Store initial task info
-        embedding_tasks[task_id] = {
-            "status": "starting",
-            "blob_url": request.blob_url,
-            "filename": request.filename or os.path.basename(request.blob_url),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "error": None,
-            "result": None,
-            "twelvelabs_tasks": []
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
+            tmp_file.write(content)
+            tmp_file_path = tmp_file.name
+        
+        logger.info(f"Creating embedding task for file: {file.filename}")
+        task = tl.embed.task.create(
+            model_name="Marengo-retrieval-2.7",
+            video_file=tmp_file_path,
+            video_clip_length=2,
+            video_embedding_scopes=["clip", "video"]
+        )
+        
+        logger.info(f"Waiting for embedding task {task.id} to complete")
+        def on_task_update(task: EmbeddingsTask):
+            logger.info(f"Task {task.id} status: {task.status}")
+        
+        task.wait_for_done(sleep_interval=5, callback=on_task_update)
+        
+        completed_task = tl.embed.task.retrieve(task.id)
+        os.unlink(tmp_file_path)
+        
+        embedding_id = f"embed_{task.id}"
+        video_id = f"video_{task.id}"
+        
+        duration = 0
+        if completed_task.video_embedding and completed_task.video_embedding.segments:
+            duration = completed_task.video_embedding.segments[-1].end_offset_sec
+        
+        embedding_storage[embedding_id] = {
+            "filename": file.filename,
+            "embeddings": completed_task.video_embedding,
+            "duration": duration
         }
         
-        # Start async processing in background
-        import threading
-        thread = threading.Thread(
-            target=process_blob_async,
-            args=(task_id, request.blob_url, request.filename, tl)
-        )
-        thread.daemon = True
-        thread.start()
+        video_storage[video_id] = content
         
         return {
-            "task_id": task_id,
-            "status": "started",
-            "message": "Processing started. Poll /ingest-blob/status/{task_id} for updates."
-        }
-    except Exception as e:
-        logger.error(f"Error starting blob ingest: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to start blob ingest: {str(e)}")
-
-
-def process_blob_async(task_id: str, blob_url: str, filename: Optional[str], tl: TwelveLabs):
-    """Process blob in background thread."""
-    tmp_file_path = None
-    try:
-        embedding_tasks[task_id]["status"] = "downloading"
-        logger.info(f"[Task {task_id}] Starting download from Vercel Blob: {filename or 'unnamed'}")
-        logger.info(f"[Task {task_id}] Blob URL: {blob_url[:100]}...")  # Log first 100 chars of URL
-        
-        # Download blob to a temp mp4 file
-        download_start = datetime.now()
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-            tmp_file_path = tmp_file.name
-            with urlopen(blob_url) as resp:
-                # Get content length if available
-                content_length = resp.headers.get('Content-Length')
-                if content_length:
-                    logger.info(f"[Task {task_id}] Downloading {int(content_length) / (1024*1024):.2f} MB")
-                
-                # Download with progress logging
-                downloaded = 0
-                chunk_size = 1024 * 1024  # 1MB chunks
-                last_log = download_start
-                
-                while True:
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    tmp_file.write(chunk)
-                    downloaded += len(chunk)
-                    
-                    # Log progress every 5 seconds
-                    now = datetime.now()
-                    if (now - last_log).total_seconds() > 5:
-                        if content_length:
-                            progress = (downloaded / int(content_length)) * 100
-                            logger.info(f"[Task {task_id}] Download progress: {progress:.1f}% ({downloaded / (1024*1024):.1f} MB)")
-                        else:
-                            logger.info(f"[Task {task_id}] Downloaded: {downloaded / (1024*1024):.1f} MB")
-                        last_log = now
-        
-        download_duration = (datetime.now() - download_start).total_seconds()
-        file_size_bytes = os.path.getsize(tmp_file_path)
-        file_size_mb = file_size_bytes / (1024*1024)  # MB
-        logger.info(f"[Task {task_id}] Download completed: {file_size_mb:.2f} MB in {download_duration:.1f}s ({file_size_mb/download_duration:.1f} MB/s)")
-
-        # Validate downloaded file
-        if file_size_bytes == 0:
-            raise Exception("Downloaded video file is empty")
-        
-        # Log file details for debugging
-        logger.info(f"[Task {task_id}] Video file details: path={tmp_file_path}, size={file_size_bytes} bytes")
-        
-        embedding_tasks[task_id]["status"] = "processing"
-        
-        # Split if needed based on size/duration
-        session_root = Path(tempfile.mkdtemp(prefix="ingest_"))
-        parts_dir = session_root / "parts"
-        logger.info(f"[Task {task_id}] Checking if video needs splitting...")
-        parts = split_video_if_needed(tmp_file_path, parts_dir)
-        logger.info(f"[Task {task_id}] Video split into {len(parts)} part(s)")
-
-        # Start all embedding tasks
-        for idx, part_path in enumerate(parts):
-            logger.info(f"[Task {task_id}] Creating TwelveLabs embedding task for part {idx+1}/{len(parts)}: {part_path}")
-            
-            # Get video properties for validation
-            try:
-                probe_cmd = [
-                    'ffprobe', '-v', 'error',
-                    '-select_streams', 'v:0',
-                    '-show_entries', 'stream=width,height,r_frame_rate,codec_name',
-                    '-show_entries', 'format=duration',
-                    '-of', 'json',
-                    part_path
-                ]
-                probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, check=True)
-                probe_data = json.loads(probe_result.stdout)
-                
-                if probe_data.get('streams'):
-                    stream = probe_data['streams'][0]
-                    width = stream.get('width', 0)
-                    height = stream.get('height', 0)
-                    codec = stream.get('codec_name', 'unknown')
-                    logger.info(f"[Task {task_id}] Video properties: {width}x{height}, codec: {codec}")
-                    
-                    # Validate resolution
-                    if width < 360 or height < 360:
-                        raise Exception(f"Video resolution too low: {width}x{height} (minimum 360x360)")
-                    if width > 3840 or height > 2160:
-                        raise Exception(f"Video resolution too high: {width}x{height} (maximum 3840x2160)")
-            except subprocess.CalledProcessError as e:
-                logger.warning(f"[Task {task_id}] Could not probe video properties: {e}")
-            except Exception as e:
-                logger.error(f"[Task {task_id}] Video validation failed: {e}")
-                raise
-            
-            try:
-                task = tl.embed.task.create(
-                    model_name="Marengo-retrieval-2.7",
-                    video_file=part_path,
-                    video_clip_length=2,
-                    video_embedding_scopes=["clip", "video"],
-                )
-                logger.info(f"[Task {task_id}] TwelveLabs task created: {task.id}")
-                
-                # Immediately check if embeddings are ready (would indicate TL caching)
-                immediate_check = tl.embed.task.retrieve(task.id)
-                if immediate_check.status == "ready":
-                    logger.info(f"[Task {task_id}] WOW! TwelveLabs returned embeddings IMMEDIATELY for task {task.id} - they must be caching!")
-                else:
-                    logger.info(f"[Task {task_id}] Initial status: {immediate_check.status} - no immediate cache hit")
-                
-                embedding_tasks[task_id]["twelvelabs_tasks"].append({
-                    "id": task.id,
-                    "part_index": idx,
-                    "part_path": part_path,
-                    "status": "processing"
-                })
-            except Exception as e:
-                logger.error(f"[Task {task_id}] Failed to create TwelveLabs task for part {idx+1}: {e}")
-                raise
-
-        # Poll for completion
-        all_segments: List[Dict[str, Any]] = []
-        total_duration: float = 0.0
-        poll_start_time = datetime.now()
-        max_poll_duration = 60 * 60  # 1 hour max
-        
-        while True:
-            # Check for timeout
-            if (datetime.now() - poll_start_time).total_seconds() > max_poll_duration:
-                raise Exception(f"Timeout: TwelveLabs processing took longer than {max_poll_duration/60} minutes")
-            
-            all_done = True
-            for tl_task in embedding_tasks[task_id]["twelvelabs_tasks"]:
-                if tl_task["status"] == "completed":
-                    continue
-                    
-                task_status = tl.embed.task.retrieve(tl_task["id"])
-                logger.info(f"[Task {task_id}] TwelveLabs task {tl_task['id']} (part {tl_task['part_index']+1}) status: {task_status.status}")
-                
-                # Only log optimization message on first check
-                if not tl_task.get("checked_before") and hasattr(task_status, 'video_embedding') and task_status.video_embedding and task_status.status == "ready":
-                    logger.info(f"[Task {task_id}] TwelveLabs returned embeddings immediately for task {tl_task['id']} - possible server-side optimization")
-                tl_task["checked_before"] = True
-                
-                if task_status.status == "ready":
-                    tl_task["status"] = "completed"
-                    completed_parts = sum(1 for t in embedding_tasks[task_id]['twelvelabs_tasks'] if t['status'] == 'completed')
-                    total_parts = len(embedding_tasks[task_id]['twelvelabs_tasks'])
-                    logger.info(f"[Task {task_id}] Part {tl_task['part_index']+1} completed. Progress: {completed_parts}/{total_parts}")
-                    
-                    # Update progress in task
-                    embedding_tasks[task_id]["progress"] = f"{completed_parts}/{total_parts} parts processed"
-                    idx = tl_task["part_index"]
-                    part_start_offset = sum(run_ffprobe_duration_seconds(parts[i]) or 0.0 for i in range(idx))
-                    
-                    if task_status.video_embedding and task_status.video_embedding.segments:
-                        for seg in task_status.video_embedding.segments:
-                            all_segments.append({
-                                "start_offset_sec": seg.start_offset_sec + part_start_offset,
-                                "end_offset_sec": seg.end_offset_sec + part_start_offset,
-                                "embedding": seg.embeddings_float,
-                            })
-                        total_duration = max(total_duration, part_start_offset + task_status.video_embedding.segments[-1].end_offset_sec)
-                elif task_status.status == "failed":
-                    # Log all available error information
-                    error_details = {
-                        "task_id": tl_task['id'],
-                        "status": task_status.status,
-                    }
-                    
-                    # Check various possible error fields
-                    for attr in ['error', 'error_message', 'message', 'status_message', 'failure_reason', 'details', 'reason']:
-                        if hasattr(task_status, attr):
-                            error_details[attr] = getattr(task_status, attr)
-                    
-                    # Check video_embedding for error details
-                    if hasattr(task_status, 'video_embedding') and task_status.video_embedding:
-                        if hasattr(task_status.video_embedding, 'error_message') and task_status.video_embedding.error_message:
-                            error_details['embedding_error'] = task_status.video_embedding.error_message
-                        if hasattr(task_status.video_embedding, 'metadata') and task_status.video_embedding.metadata:
-                            metadata = task_status.video_embedding.metadata
-                            error_details['input_filename'] = getattr(metadata, 'input_filename', None)
-                            error_details['input_url'] = getattr(metadata, 'input_url', None)
-                    
-                    # Check for specific error codes
-                    error_code_meanings = {
-                        'video_resolution_too_low': 'Video resolution is below 360x360 pixels',
-                        'video_resolution_too_high': 'Video resolution exceeds 3840x2160 pixels',
-                        'video_duration_too_short': 'Video is shorter than 10 seconds',
-                        'video_duration_too_long': 'Video is longer than 2 hours',
-                        'video_file_broken': 'Video file is corrupted or unreadable'
-                    }
-                    
-                    # Check if any error field contains known error codes
-                    for field, value in error_details.items():
-                        if value and isinstance(value, str):
-                            for code, meaning in error_code_meanings.items():
-                                if code in value:
-                                    error_details['error_meaning'] = meaning
-                                    break
-                    
-                    logger.error(f"[Task {task_id}] TwelveLabs task failed with details: {error_details}")
-                    
-                    # Extract the most relevant error message
-                    error_msg = (
-                        error_details.get('error_meaning') or
-                        error_details.get('embedding_error') or
-                        error_details.get('error_message') or 
-                        error_details.get('error') or 
-                        error_details.get('message') or 
-                        error_details.get('failure_reason') or
-                        'Unknown error'
-                    )
-                    
-                    # Include all error details in the exception for better debugging
-                    detailed_error = f"TwelveLabs task {tl_task['id']} failed: {error_msg}"
-                    if len(error_details) > 2:  # More than just task_id and status
-                        detailed_error += f" (Details: {json.dumps(error_details)})"
-                    
-                    raise Exception(detailed_error)
-                else:
-                    all_done = False
-            
-            if all_done:
-                break
-            
-            import time
-            time.sleep(5)
-
-        # Store results
-        embedding_id = f"embed_{hashlib.sha256((blob_url).encode()).hexdigest()[:16]}"
-        embedding_storage[embedding_id] = {
-            "filename": filename or os.path.basename(blob_url),
-            "embeddings": {"segments": all_segments},
-            "duration": total_duration,
-            "source": "blob",
-            "blob_url": blob_url,
-        }
-
-        embedding_tasks[task_id]["status"] = "completed"
-        embedding_tasks[task_id]["result"] = {
-            "embeddings": {"segments": all_segments},
-            "filename": filename or os.path.basename(blob_url),
-            "duration": total_duration,
+            "embeddings": completed_task.video_embedding,
+            "filename": file.filename,
+            "duration": duration,
             "embedding_id": embedding_id,
-            "video_url": blob_url,
+            "video_id": video_id
         }
         
-        # Cleanup parts
-        shutil.rmtree(session_root, ignore_errors=True)
-        
     except Exception as e:
-        logger.error(f"Error processing blob async: {e}")
-        embedding_tasks[task_id]["status"] = "failed"
-        embedding_tasks[task_id]["error"] = str(e)
-    finally:
-        try:
-            if tmp_file_path and os.path.exists(tmp_file_path):
-                os.unlink(tmp_file_path)
-        except Exception:
-            pass
-
-
-@app.get("/ingest-blob/status/{task_id}")
-async def get_ingest_status(task_id: str):
-    """Get status of async blob ingest task."""
-    if task_id not in embedding_tasks:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    task = embedding_tasks[task_id]
-    response = {
-        "task_id": task_id,
-        "status": task["status"],
-        "created_at": task["created_at"],
-    }
-    
-    if task["status"] == "completed" and task["result"]:
-        response.update(task["result"])
-    elif task["status"] == "failed" and task["error"]:
-        response["error"] = task["error"]
-    elif task["status"] == "processing" and task["twelvelabs_tasks"]:
-        # Include progress info
-        total = len(task["twelvelabs_tasks"])
-        completed = sum(1 for t in task["twelvelabs_tasks"] if t["status"] == "completed")
-        response["progress"] = f"{completed}/{total} parts processed"
-        
-        # Add estimated time remaining if we have progress
-        if completed > 0:
-            elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(task["created_at"])).total_seconds()
-            avg_time_per_part = elapsed / completed
-            remaining_parts = total - completed
-            estimated_remaining_seconds = remaining_parts * avg_time_per_part
-            response["estimated_remaining_seconds"] = int(estimated_remaining_seconds)
-            response["elapsed_seconds"] = int(elapsed)
-    
-    return response
-
-
-def run_ffprobe_duration_seconds(file_path: str) -> Optional[float]:
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1", file_path
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=True,
-        )
-        return float(result.stdout.strip())
-    except Exception:
-        return None
-
-
-def split_video_if_needed(src_path: str, dest_dir: Path) -> List[str]:
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    duration = run_ffprobe_duration_seconds(src_path) or 0.0
-    size_bytes = os.path.getsize(src_path)
-    needs_split = (duration and duration > MAX_EMBED_DURATION_SEC) or size_bytes > MAX_EMBED_SIZE_BYTES
-    if not needs_split:
-        return [src_path]
-
-    # Split by time into chunks no longer than 3600 seconds to stay safely under 2h and reduce size
-    segment_time = 3600
-    pattern = str(dest_dir / "part_%03d.mp4")
-    try:
-        subprocess.run(
-            [
-                "ffmpeg", "-y", "-i", src_path, "-c", "copy", "-f", "segment",
-                "-reset_timestamps", "1", "-segment_time", str(segment_time), pattern
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except Exception as e:
-        logger.error(f"ffmpeg split failed: {e}")
-        # If split fails, fallback to single file
-        return [src_path]
-
-    # Collect generated parts
-    parts = sorted([str(p) for p in dest_dir.glob("part_*.mp4")])
-    return parts if parts else [src_path]
-
-
-def concat_chunks_to_file(chunks_dir: Path, output_path: Path, total_chunks: int) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "wb") as out_f:
-        for i in range(total_chunks):
-            chunk_file = chunks_dir / f"chunk_{i}.bin"
-            if not chunk_file.exists():
-                raise HTTPException(status_code=400, detail=f"Missing chunk {i}")
-            with open(chunk_file, "rb") as cf:
-                out_f.write(cf.read())
-
-
-# Removed legacy chunking endpoints to simplify flow with Vercel Blob
+        logger.error(f"Error generating embeddings: {e}")
+        if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
+            os.unlink(tmp_file_path)
+        raise HTTPException(status_code=500, detail=f"Failed to generate embeddings: {str(e)}")
 
 @app.post("/compare-local-videos")
 async def compare_local_videos(
@@ -659,35 +281,19 @@ async def compare_local_videos(
         segments1 = []
         segments2 = []
         
-        if embed_data1.get("embeddings"):
-            emb1 = embed_data1["embeddings"]
-            if hasattr(emb1, "segments"):
-                segments1 = [{
+        if embed_data1["embeddings"] and embed_data1["embeddings"].segments:
+            segments1 = [{
                 "start_offset_sec": seg.start_offset_sec,
                 "end_offset_sec": seg.end_offset_sec,
                 "embedding": seg.embeddings_float
-                } for seg in emb1.segments]
-            elif isinstance(emb1, dict) and isinstance(emb1.get("segments"), list):
-                segments1 = [{
-                    "start_offset_sec": seg["start_offset_sec"],
-                    "end_offset_sec": seg["end_offset_sec"],
-                    "embedding": seg.get("embedding") or seg.get("embeddings_float")
-                } for seg in emb1["segments"]]
+            } for seg in embed_data1["embeddings"].segments]
         
-        if embed_data2.get("embeddings"):
-            emb2 = embed_data2["embeddings"]
-            if hasattr(emb2, "segments"):
-                segments2 = [{
+        if embed_data2["embeddings"] and embed_data2["embeddings"].segments:
+            segments2 = [{
                 "start_offset_sec": seg.start_offset_sec,
                 "end_offset_sec": seg.end_offset_sec,
                 "embedding": seg.embeddings_float
-                } for seg in emb2.segments]
-            elif isinstance(emb2, dict) and isinstance(emb2.get("segments"), list):
-                segments2 = [{
-                    "start_offset_sec": seg["start_offset_sec"],
-                    "end_offset_sec": seg["end_offset_sec"],
-                    "embedding": seg.get("embedding") or seg.get("embeddings_float")
-                } for seg in emb2["segments"]]
+            } for seg in embed_data2["embeddings"].segments]
         
         logger.info(f"Comparing {len(segments1)} segments from video1 with {len(segments2)} segments from video2, threshold: {threshold}")
         
@@ -757,14 +363,10 @@ async def compare_local_videos(
 
 @app.get("/serve-video/{video_id}")
 async def serve_video(video_id: str):
-    # Prefer disk path serving for large files
-    from fastapi.responses import FileResponse
-    path = video_path_storage.get(video_id)
-    if path and os.path.exists(path):
-        return FileResponse(path, media_type="video/mp4")
-    if video_id in video_storage:
-        return Response(content=video_storage[video_id], media_type="video/mp4")
+    if video_id not in video_storage:
         raise HTTPException(status_code=404, detail="Video not found")
+    
+    return Response(content=video_storage[video_id], media_type="video/mp4")
 
 # Custom 404 handler
 @app.exception_handler(404)
