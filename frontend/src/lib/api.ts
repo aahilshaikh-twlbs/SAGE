@@ -50,7 +50,7 @@ export const api = {
     }, key);
   },
 
-  // Upload video and generate embeddings
+  // Upload video and generate embeddings - UPDATED VERSION
   uploadAndGenerateEmbeddings: async (formData: FormData, apiKey?: string): Promise<{
     embeddings: unknown;
     filename: string;
