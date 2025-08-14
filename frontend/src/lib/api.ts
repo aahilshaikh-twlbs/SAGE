@@ -1,7 +1,6 @@
 import { ApiKeyConfig } from '@/types';
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://209.38.142.207';
-export const DIRECT_API_URL = process.env.NEXT_PUBLIC_DIRECT_API_URL || 'https://209.38.142.207';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export class ApiError extends Error {
   constructor(message: string, public status?: number) {
@@ -26,41 +25,20 @@ async function apiRequest<T>(
     headers['X-API-Key'] = keyToUse;
   }
 
-  // Try direct connection first
-  try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      headers,
-      ...options,
-    });
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    headers,
+    ...options,
+  });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => null);
-      throw new ApiError(
-        errorData?.detail || `Request failed: ${response.statusText}`,
-        response.status
-      );
-    }
-
-    return response.json();
-  } catch (error) {
-    console.warn('Direct API call failed, trying proxy...', error);
-    
-    // Fallback to proxy if direct fails
-    const proxyResponse = await fetch(`/api${endpoint}`, {
-      headers,
-      ...options,
-    });
-
-    if (!proxyResponse.ok) {
-      const errorData = await proxyResponse.json().catch(() => null);
-      throw new ApiError(
-        errorData?.detail || `Request failed: ${proxyResponse.statusText}`,
-        proxyResponse.status
-      );
-    }
-
-    return proxyResponse.json();
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
+    throw new ApiError(
+      errorData?.detail || `Request failed: ${response.statusText}`,
+      response.status
+    );
   }
+
+  return response.json();
 }
 
 export const api = {

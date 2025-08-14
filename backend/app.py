@@ -17,41 +17,13 @@ import boto3
 from botocore.exceptions import ClientError
 import uuid
 
-# Configure logging with detailed timestamps in PST
-import pytz
-pst_tz = pytz.timezone('America/Los_Angeles')
-
-class PSTFormatter(logging.Formatter):
-    def formatTime(self, record, datefmt=None):
-        dt = datetime.fromtimestamp(record.created, tz=pst_tz)
-        if datefmt:
-            return dt.strftime(datefmt)
-        return dt.strftime('%Y-%m-%d %H:%M:%S %Z')
-
-# Configure logging with detailed format
+# Configure logging with timestamps
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s | %(levelname)-8s | %(name)-20s | %(funcName)-20s | %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
-
-# Create custom handler with PST formatter
-handler = logging.StreamHandler()
-formatter = PSTFormatter(
-    fmt='%(asctime)s | %(levelname)-8s | %(name)-20s | %(funcName)-20s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S %Z'
-)
-handler.setFormatter(formatter)
-
-# Configure logger - only use our custom handler
 logger = logging.getLogger(__name__)
-logger.handlers.clear()  # Remove default handlers
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-
-# Disable duplicate logging from other modules
-logging.getLogger('httpx').setLevel(logging.WARNING)
-logging.getLogger('uvicorn').setLevel(logging.WARNING)
 
 app = FastAPI(title="SAGE Backend", version="2.0.0")
 
@@ -132,7 +104,7 @@ conn.close()
 
 # S3 Configuration
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "tl-sage-bucket")
-S3_REGION = os.getenv("S3_REGION", "us-east-2")  # Bucket is actually in us-east-2
+S3_REGION = os.getenv("S3_REGION", "us-west-2")  # Changed to match your SSO region
 S3_PROFILE = os.getenv("S3_PROFILE", "dev")  # Use the dev profile
 
 # Initialize S3 client using AWS profile
@@ -164,18 +136,12 @@ def upload_to_s3(file_content: bytes, filename: str, content_type: str = "video/
         The S3 URL of the uploaded file
     """
     if not s3_client:
-        logger.error("S3 client not initialized - cannot upload file")
         raise Exception("S3 client not initialized")
     
     # Generate unique key for S3
     file_key = f"videos/{uuid.uuid4()}_{filename}"
-    file_size_mb = len(file_content) / (1024 * 1024)
-    
-    logger.info(f"Starting S3 upload: filename='{filename}', size={file_size_mb:.2f}MB, key='{file_key}'")
     
     try:
-        start_time = datetime.now()
-        
         s3_client.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=file_key,
@@ -183,27 +149,18 @@ def upload_to_s3(file_content: bytes, filename: str, content_type: str = "video/
             ContentType=content_type,
             Metadata={
                 'original_filename': filename,
-                'upload_timestamp': datetime.now().isoformat(),
-                'file_size_bytes': str(len(file_content)),
-                'content_type': content_type
+                'upload_timestamp': datetime.now().isoformat()
             }
         )
         
-        upload_duration = (datetime.now() - start_time).total_seconds()
-        
         # Generate S3 URL
         s3_url = f"s3://{S3_BUCKET_NAME}/{file_key}"
-        logger.info(f"S3 upload successful: {s3_url} | Duration: {upload_duration:.3f}s | Size: {file_size_mb:.2f}MB")
+        logger.info(f"File uploaded to S3: {s3_url}")
         return s3_url
         
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
-        logger.error(f"S3 upload failed: filename='{filename}', error_code='{error_code}', message='{error_message}'")
-        raise Exception(f"S3 upload failed: {error_code} - {error_message}")
-    except Exception as e:
-        logger.error(f"Unexpected error during S3 upload: filename='{filename}', error='{str(e)}'")
-        raise
+        logger.error(f"Failed to upload file to S3: {e}")
+        raise Exception(f"S3 upload failed: {str(e)}")
 
 def get_s3_presigned_url(s3_url: str, expiration: int = 3600) -> str:
     """
@@ -228,28 +185,15 @@ def get_s3_presigned_url(s3_url: str, expiration: int = 3600) -> str:
         raise Exception("Invalid S3 URL format")
     
     try:
-        logger.info(f"Generating presigned URL: bucket='{bucket}', key='{key}', expiration={expiration}s")
-        
         presigned_url = s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': bucket, 'Key': key},
             ExpiresIn=expiration
         )
-        
-        # Log URL generation success (truncate URL for security)
-        url_preview = presigned_url[:100] + "..." if len(presigned_url) > 100 else presigned_url
-        logger.info(f"Presigned URL generated successfully: {url_preview}")
-        
         return presigned_url
-        
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        error_message = e.response['Error']['Message']
-        logger.error(f"Failed to generate presigned URL: bucket='{bucket}', key='{key}', error_code='{error_code}', message='{error_message}'")
-        raise Exception(f"Presigned URL generation failed: {error_code} - {error_message}")
-    except Exception as e:
-        logger.error(f"Unexpected error generating presigned URL: bucket='{bucket}', key='{key}', error='{str(e)}'")
-        raise
+        logger.error(f"Failed to generate presigned URL: {e}")
+        raise Exception(f"Presigned URL generation failed: {str(e)}")
 
 current_api_key = None
 tl_client = None
@@ -364,19 +308,15 @@ async def upload_and_generate_embeddings(
     tl: TwelveLabs = Depends(get_twelve_labs_client)
 ):
     try:
-        logger.info(f"Starting video upload process: filename='{file.filename}', size={file.size} bytes, content_type='{file.content_type}'")
-        
         content = await file.read()
-        logger.info(f"File content read successfully: filename='{file.filename}', content_size={len(content)} bytes")
         
         # Upload to S3 first
-        logger.info(f"Initiating S3 upload for file: {file.filename}")
+        logger.info(f"Uploading file {file.filename} to S3...")
         s3_url = upload_to_s3(content, file.filename)
         
         # Generate unique IDs
         video_id = f"video_{uuid.uuid4()}"
         embedding_id = f"embed_{uuid.uuid4()}"
-        logger.info(f"Generated IDs: video_id='{video_id}', embedding_id='{embedding_id}'")
         
         # Store video metadata immediately
         video_storage[video_id] = {
@@ -386,7 +326,6 @@ async def upload_and_generate_embeddings(
             "upload_timestamp": datetime.now().isoformat(),
             "embedding_id": embedding_id
         }
-        logger.info(f"Video metadata stored: video_id='{video_id}', status='uploaded'")
         
         # Initialize embedding storage
         embedding_storage[embedding_id] = {
@@ -395,14 +334,12 @@ async def upload_and_generate_embeddings(
             "video_id": video_id,
             "s3_url": s3_url
         }
-        logger.info(f"Embedding storage initialized: embedding_id='{embedding_id}', status='pending'")
         
         # Start async embedding generation
         import asyncio
         asyncio.create_task(generate_embeddings_async(embedding_id, s3_url, tl))
-        logger.info(f"Async embedding generation task created for: embedding_id='{embedding_id}'")
         
-        logger.info(f"Video upload process completed successfully: filename='{file.filename}', video_id='{video_id}', embedding_id='{embedding_id}'")
+        logger.info(f"File {file.filename} uploaded to S3 and embedding generation started")
         
         return {
             "message": "Video uploaded successfully. Embedding generation in progress.",
@@ -413,7 +350,7 @@ async def upload_and_generate_embeddings(
         }
         
     except Exception as e:
-        logger.error(f"Video upload process failed: filename='{file.filename}', error='{str(e)}'", exc_info=True)
+        logger.error(f"Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
 
 async def generate_embeddings_async(embedding_id: str, s3_url: str, tl: TwelveLabs):
@@ -421,22 +358,15 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, tl: TwelveLa
     Asynchronously generate embeddings for a video from S3.
     """
     try:
-        logger.info(f"Starting async embedding generation: embedding_id='{embedding_id}', s3_url='{s3_url}'")
+        logger.info(f"Starting async embedding generation for {embedding_id}")
         
         # Update status
         embedding_storage[embedding_id]["status"] = "processing"
-        logger.info(f"Updated embedding status: embedding_id='{embedding_id}', status='processing'")
         
         # Generate presigned URL for TwelveLabs to access the video
-        logger.info(f"Generating presigned URL for TwelveLabs access: embedding_id='{embedding_id}'")
         presigned_url = get_s3_presigned_url(s3_url)
-        logger.info(f"Presigned URL generated successfully for embedding_id='{embedding_id}'")
         
-        # Create embedding task using presigned URL
-        logger.info(f"Creating TwelveLabs embedding task: embedding_id='{embedding_id}', model='Marengo-retrieval-2.7'")
-        logger.info(f"Using presigned URL for TwelveLabs: {presigned_url[:100]}...")
-        start_time = datetime.now()
-        
+        # Create embedding task using presigned HTTPS URL
         task = tl.embed.task.create(
             model_name="Marengo-retrieval-2.7",
             video_url=presigned_url,  # Use presigned HTTPS URL
@@ -444,25 +374,21 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, tl: TwelveLa
             video_embedding_scopes=["clip", "video"]
         )
         
-        task_creation_duration = (datetime.now() - start_time).total_seconds()
-        logger.info(f"TwelveLabs task created successfully: embedding_id='{embedding_id}', task_id='{task.id}', creation_time={task_creation_duration:.3f}s")
+        logger.info(f"Embedding task {task.id} created for {embedding_id}")
         
         # Wait for completion
         def on_task_update(task: EmbeddingsTask):
-            logger.info(f"TwelveLabs task update: embedding_id='{embedding_id}', task_id='{task.id}', status='{task.status}'")
+            logger.info(f"Task {task.id} status: {task.status}")
         
-        logger.info(f"Starting task monitoring: embedding_id='{embedding_id}', task_id='{task.id}'")
         task.wait_for_done(sleep_interval=5, callback=on_task_update)
         
         # Get completed task
-        logger.info(f"Task completed, retrieving results: embedding_id='{embedding_id}', task_id='{task.id}'")
         completed_task = tl.embed.task.retrieve(task.id)
         
         # Calculate duration
         duration = 0
         if completed_task.video_embedding and completed_task.video_embedding.segments:
             duration = completed_task.video_embedding.segments[-1].end_offset_sec
-            logger.info(f"Duration calculated: embedding_id='{embedding_id}', duration={duration:.2f}s, segments={len(completed_task.video_embedding.segments)}")
         
         # Update embedding storage
         embedding_storage[embedding_id].update({
@@ -472,23 +398,19 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, tl: TwelveLa
             "task_id": task.id,
             "completed_at": datetime.now().isoformat()
         })
-        logger.info(f"Embedding storage updated: embedding_id='{embedding_id}', status='completed', duration={duration:.2f}s")
         
         # Update video storage with duration
         video_id = embedding_storage[embedding_id]["video_id"]
         if video_id in video_storage:
             video_storage[video_id]["duration"] = duration
             video_storage[video_id]["status"] = "ready"
-            logger.info(f"Video storage updated: video_id='{video_id}', status='ready', duration={duration:.2f}s")
         
-        total_duration = (datetime.now() - start_time).total_seconds()
-        logger.info(f"Embedding generation completed successfully: embedding_id='{embedding_id}', total_time={total_duration:.3f}s, duration={duration:.2f}s")
+        logger.info(f"Embedding generation completed for {embedding_id}")
         
     except Exception as e:
-        logger.error(f"Error in async embedding generation: embedding_id='{embedding_id}', error='{str(e)}'", exc_info=True)
+        logger.error(f"Error in async embedding generation for {embedding_id}: {e}")
         embedding_storage[embedding_id]["status"] = "failed"
         embedding_storage[embedding_id]["error"] = str(e)
-        logger.error(f"Embedding status set to failed: embedding_id='{embedding_id}', error='{str(e)}'")
 
 @app.post("/compare-local-videos")
 async def compare_local_videos(
@@ -666,10 +588,4 @@ async def custom_404_handler(request: Request, exc):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000,
-        ssl_keyfile="ssl/key.pem",
-        ssl_certfile="ssl/cert.pem"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000)
