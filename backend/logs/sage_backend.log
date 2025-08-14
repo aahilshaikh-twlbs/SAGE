@@ -1,0 +1,17 @@
+2025-08-14 01:51:21 - __main__ - INFO - init_database:143 - Database connection established to sage.db
+2025-08-14 01:51:21 - __main__ - INFO - init_database:154 - Database tables initialized successfully
+2025-08-14 01:51:21 - __main__ - INFO - init_database:156 - Database connection closed
+2025-08-14 01:51:21 - __main__ - INFO - <module>:197 - Server started at 2025-08-14 01:51:21.682232+00:00
+2025-08-14 01:51:21 - __main__ - INFO - <module>:198 - Current working directory: /root/SAGE/backend
+2025-08-14 01:51:21 - __main__ - INFO - <module>:199 - Python version: 3.12.3 (main, Jun 18 2025, 17:59:45) [GCC 13.3.0]
+2025-08-14 01:51:21 - __main__ - INFO - <module>:200 - Environment variables: CORS_ORIGINS=['http://localhost:3000', 'https://tl-sage.vercel.app', 'http://209.38.142.207:8000']
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:51 - ============================================================
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:52 - SAGE BACKEND STARTING UP
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:53 - ============================================================
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:54 - Application: SAGE Backend v2.0.0
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:55 - Startup time: 2025-08-14 01:51:21.762884+00:00
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:56 - Python version: 3.12.3 (main, Jun 18 2025, 17:59:45) [GCC 13.3.0]
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:57 - Working directory: /root/SAGE/backend
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:58 - CORS origins: ['http://localhost:3000', 'https://tl-sage.vercel.app', 'http://209.38.142.207:8000']
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:59 - Database path: sage.db
+2025-08-14 01:51:21 - __main__ - INFO - startup_event:60 - ============================================================
