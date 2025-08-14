@@ -1,6 +1,7 @@
 import { ApiKeyConfig } from '@/types';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
+export const DIRECT_API_URL = process.env.NEXT_PUBLIC_DIRECT_API_URL || 'http://209.38.142.207:8000';
 
 export class ApiError extends Error {
   constructor(message: string, public status?: number) {
