@@ -54,3 +54,27 @@
 2025-08-14 01:59:29 - __main__ - INFO - shutdown_event:68 - Shutdown time: 2025-08-14 01:59:29.959450+00:00
 2025-08-14 01:59:29 - __main__ - INFO - shutdown_event:69 - Total uptime: 0:02:56.926880
 2025-08-14 01:59:29 - __main__ - INFO - shutdown_event:70 - ============================================================
+2025-08-14 02:02:40 - __main__ - INFO - init_database:143 - Database connection established to sage.db
+2025-08-14 02:02:40 - __main__ - INFO - init_database:154 - Database tables initialized successfully
+2025-08-14 02:02:40 - __main__ - INFO - init_database:156 - Database connection closed
+2025-08-14 02:02:40 - __main__ - INFO - <module>:197 - Server started at 2025-08-14 02:02:40.038898+00:00
+2025-08-14 02:02:40 - __main__ - INFO - <module>:198 - Current working directory: /root/SAGE/backend
+2025-08-14 02:02:40 - __main__ - INFO - <module>:199 - Python version: 3.12.3 (main, Jun 18 2025, 17:59:45) [GCC 13.3.0]
+2025-08-14 02:02:40 - __main__ - INFO - <module>:200 - Environment variables: CORS_ORIGINS=['http://localhost:3000', 'https://tl-sage.vercel.app', 'http://209.38.142.207:8000']
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:51 - ============================================================
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:52 - SAGE BACKEND STARTING UP
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:53 - ============================================================
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:54 - Application: SAGE Backend v2.0.0
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:55 - Startup time: 2025-08-14 02:02:40.117825+00:00
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:56 - Python version: 3.12.3 (main, Jun 18 2025, 17:59:45) [GCC 13.3.0]
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:57 - Working directory: /root/SAGE/backend
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:58 - CORS origins: ['http://localhost:3000', 'https://tl-sage.vercel.app', 'http://209.38.142.207:8000']
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:59 - Database path: sage.db
+2025-08-14 02:02:40 - __main__ - INFO - startup_event:60 - ============================================================
+2025-08-14 02:02:53 - __main__ - WARNING - log_requests:122 - 13.57.203.92 - POST /upload-and-generate-embeddings - 422 (0.001s)
+2025-08-14 02:02:54 - __main__ - WARNING - log_requests:122 - 13.57.203.92 - POST /upload-and-generate-embeddings - 422 (0.001s)
+2025-08-14 04:22:49 - __main__ - WARNING - log_requests:122 - 172.56.179.204 - GET /health - 422 (0.001s)
+2025-08-14 04:22:50 - __main__ - INFO - log_requests:124 - 172.56.179.204 - GET /favicon.ico - 204 (0.000s)
+2025-08-14 04:43:57 - __main__ - INFO - log_requests:124 - 45.156.130.45 - GET / - 200 (0.000s)
+2025-08-14 04:57:58 - __main__ - INFO - log_requests:124 - 194.187.178.87 - GET / - 200 (0.000s)
+2025-08-14 04:57:59 - __main__ - INFO - log_requests:124 - 194.187.178.65 - GET /favicon.ico - 204 (0.000s)
