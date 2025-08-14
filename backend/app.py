@@ -13,6 +13,9 @@ import tempfile
 import os
 from datetime import datetime, timezone
 import sys
+import boto3
+from botocore.exceptions import ClientError
+import uuid
 
 # Configure logging with timestamps
 logging.basicConfig(
@@ -99,10 +102,103 @@ conn.execute('''
 conn.commit()
 conn.close()
 
+# S3 Configuration
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "tl-sage-bucket")
+S3_REGION = os.getenv("S3_REGION", "us-west-2")  # Changed to match your SSO region
+S3_PROFILE = os.getenv("S3_PROFILE", "dev")  # Use the dev profile
+
+# Initialize S3 client using AWS profile
+s3_client = None
+try:
+    # Create a session using the AWS profile
+    session = boto3.Session(profile_name=S3_PROFILE, region_name=S3_REGION)
+    s3_client = session.client('s3')
+    
+    # Test the connection by listing buckets
+    s3_client.list_buckets()
+    logger.info(f"S3 client initialized using profile '{S3_PROFILE}' for bucket: {S3_BUCKET_NAME}")
+    
+except Exception as e:
+    logger.warning(f"S3 client initialization failed: {e}")
+    logger.warning("S3 functionality will be disabled. Make sure AWS SSO is configured and you're logged in.")
+    s3_client = None
+
+def upload_to_s3(file_content: bytes, filename: str, content_type: str = "video/mp4") -> str:
+    """
+    Upload a file to S3 and return the S3 URL.
+    
+    Args:
+        file_content: The file content as bytes
+        filename: The original filename
+        content_type: The MIME type of the file
+        
+    Returns:
+        The S3 URL of the uploaded file
+    """
+    if not s3_client:
+        raise Exception("S3 client not initialized")
+    
+    # Generate unique key for S3
+    file_key = f"videos/{uuid.uuid4()}_{filename}"
+    
+    try:
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=file_key,
+            Body=file_content,
+            ContentType=content_type,
+            Metadata={
+                'original_filename': filename,
+                'upload_timestamp': datetime.now().isoformat()
+            }
+        )
+        
+        # Generate S3 URL
+        s3_url = f"s3://{S3_BUCKET_NAME}/{file_key}"
+        logger.info(f"File uploaded to S3: {s3_url}")
+        return s3_url
+        
+    except ClientError as e:
+        logger.error(f"Failed to upload file to S3: {e}")
+        raise Exception(f"S3 upload failed: {str(e)}")
+
+def get_s3_presigned_url(s3_url: str, expiration: int = 3600) -> str:
+    """
+    Generate a presigned URL for an S3 object.
+    
+    Args:
+        s3_url: The S3 URL (s3://bucket/key)
+        expiration: URL expiration time in seconds
+        
+    Returns:
+        Presigned URL for direct access
+    """
+    if not s3_client:
+        raise Exception("S3 client not initialized")
+    
+    # Parse S3 URL
+    if s3_url.startswith("s3://"):
+        parts = s3_url[5:].split("/", 1)
+        bucket = parts[0]
+        key = parts[1] if len(parts) > 1 else ""
+    else:
+        raise Exception("Invalid S3 URL format")
+    
+    try:
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket, 'Key': key},
+            ExpiresIn=expiration
+        )
+        return presigned_url
+    except ClientError as e:
+        logger.error(f"Failed to generate presigned URL: {e}")
+        raise Exception(f"Presigned URL generation failed: {str(e)}")
+
 current_api_key = None
 tl_client = None
 embedding_storage: Dict[str, Any] = {}
-video_storage: Dict[str, bytes] = {}
+video_storage: Dict[str, Dict[str, Any]] = {}  # Store metadata instead of content
 
 # Track server start time
 server_start_time = datetime.now(timezone.utc)
@@ -214,55 +310,104 @@ async def upload_and_generate_embeddings(
     try:
         content = await file.read()
         
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-            tmp_file.write(content)
-            tmp_file_path = tmp_file.name
+        # Upload to S3 first
+        logger.info(f"Uploading file {file.filename} to S3...")
+        s3_url = upload_to_s3(content, file.filename)
         
-        logger.info(f"Creating embedding task for file: {file.filename}")
+        # Generate unique IDs
+        video_id = f"video_{uuid.uuid4()}"
+        embedding_id = f"embed_{uuid.uuid4()}"
+        
+        # Store video metadata immediately
+        video_storage[video_id] = {
+            "filename": file.filename,
+            "s3_url": s3_url,
+            "status": "uploaded",
+            "upload_timestamp": datetime.now().isoformat(),
+            "embedding_id": embedding_id
+        }
+        
+        # Initialize embedding storage
+        embedding_storage[embedding_id] = {
+            "filename": file.filename,
+            "status": "pending",
+            "video_id": video_id,
+            "s3_url": s3_url
+        }
+        
+        # Start async embedding generation
+        import asyncio
+        asyncio.create_task(generate_embeddings_async(embedding_id, s3_url, tl))
+        
+        logger.info(f"File {file.filename} uploaded to S3 and embedding generation started")
+        
+        return {
+            "message": "Video uploaded successfully. Embedding generation in progress.",
+            "filename": file.filename,
+            "video_id": video_id,
+            "embedding_id": embedding_id,
+            "status": "processing"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+
+async def generate_embeddings_async(embedding_id: str, s3_url: str, tl: TwelveLabs):
+    """
+    Asynchronously generate embeddings for a video from S3.
+    """
+    try:
+        logger.info(f"Starting async embedding generation for {embedding_id}")
+        
+        # Update status
+        embedding_storage[embedding_id]["status"] = "processing"
+        
+        # Create embedding task using S3 URL
         task = tl.embed.task.create(
             model_name="Marengo-retrieval-2.7",
-            video_file=tmp_file_path,
+            video_url=s3_url,  # Use S3 URL instead of local file
             video_clip_length=2,
             video_embedding_scopes=["clip", "video"]
         )
         
-        logger.info(f"Waiting for embedding task {task.id} to complete")
+        logger.info(f"Embedding task {task.id} created for {embedding_id}")
+        
+        # Wait for completion
         def on_task_update(task: EmbeddingsTask):
             logger.info(f"Task {task.id} status: {task.status}")
         
         task.wait_for_done(sleep_interval=5, callback=on_task_update)
         
+        # Get completed task
         completed_task = tl.embed.task.retrieve(task.id)
-        os.unlink(tmp_file_path)
         
-        embedding_id = f"embed_{task.id}"
-        video_id = f"video_{task.id}"
-        
+        # Calculate duration
         duration = 0
         if completed_task.video_embedding and completed_task.video_embedding.segments:
             duration = completed_task.video_embedding.segments[-1].end_offset_sec
         
-        embedding_storage[embedding_id] = {
-            "filename": file.filename,
+        # Update embedding storage
+        embedding_storage[embedding_id].update({
+            "status": "completed",
             "embeddings": completed_task.video_embedding,
-            "duration": duration
-        }
-        
-        video_storage[video_id] = content
-        
-        return {
-            "embeddings": completed_task.video_embedding,
-            "filename": file.filename,
             "duration": duration,
-            "embedding_id": embedding_id,
-            "video_id": video_id
-        }
+            "task_id": task.id,
+            "completed_at": datetime.now().isoformat()
+        })
+        
+        # Update video storage with duration
+        video_id = embedding_storage[embedding_id]["video_id"]
+        if video_id in video_storage:
+            video_storage[video_id]["duration"] = duration
+            video_storage[video_id]["status"] = "ready"
+        
+        logger.info(f"Embedding generation completed for {embedding_id}")
         
     except Exception as e:
-        logger.error(f"Error generating embeddings: {e}")
-        if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
-            os.unlink(tmp_file_path)
-        raise HTTPException(status_code=500, detail=f"Failed to generate embeddings: {str(e)}")
+        logger.error(f"Error in async embedding generation for {embedding_id}: {e}")
+        embedding_storage[embedding_id]["status"] = "failed"
+        embedding_storage[embedding_id]["error"] = str(e)
 
 @app.post("/compare-local-videos")
 async def compare_local_videos(
@@ -277,6 +422,13 @@ async def compare_local_videos(
         
         embed_data1 = embedding_storage[embedding_id1]
         embed_data2 = embedding_storage[embedding_id2]
+        
+        # Check if embeddings are ready
+        if embed_data1["status"] != "completed":
+            raise HTTPException(status_code=400, detail=f"Embedding {embedding_id1} is not ready. Status: {embed_data1['status']}")
+        
+        if embed_data2["status"] != "completed":
+            raise HTTPException(status_code=400, detail=f"Embedding {embedding_id2} is not ready. Status: {embed_data2['status']}")
         
         segments1 = []
         segments2 = []
@@ -295,7 +447,7 @@ async def compare_local_videos(
                 "embedding": seg.embeddings_float
             } for seg in embed_data2["embeddings"].segments]
         
-        logger.info(f"Comparing {len(segments1)} segments from video1 with {len(segments2)} segments from video2, threshold: {threshold}")
+        logger.info(f"Comparing {len(segments1)} segments from video1 with {len(segments1)} segments from video2, threshold: {threshold}")
         
         # Compare segments
         def keyfunc(s):
@@ -366,7 +518,51 @@ async def serve_video(video_id: str):
     if video_id not in video_storage:
         raise HTTPException(status_code=404, detail="Video not found")
     
-    return Response(content=video_storage[video_id], media_type="video/mp4")
+    video_data = video_storage[video_id]
+    s3_url = video_data["s3_url"]
+    
+    # Generate a presigned URL for direct access
+    presigned_url = get_s3_presigned_url(s3_url)
+    
+    return {"video_url": presigned_url}
+
+@app.get("/embedding-status/{embedding_id}")
+async def get_embedding_status(embedding_id: str):
+    """Get the status of embedding generation for a video."""
+    if embedding_id not in embedding_storage:
+        raise HTTPException(status_code=404, detail="Embedding not found")
+    
+    embedding_data = embedding_storage[embedding_id]
+    return {
+        "embedding_id": embedding_id,
+        "filename": embedding_data["filename"],
+        "status": embedding_data["status"],
+        "duration": embedding_data.get("duration"),
+        "completed_at": embedding_data.get("completed_at"),
+        "error": embedding_data.get("error")
+    }
+
+@app.get("/video-status/{video_id}")
+async def get_video_status(video_id: str):
+    """Get the status of a video including its embedding status."""
+    if video_id not in video_storage:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    video_data = video_storage[video_id]
+    embedding_id = video_data["embedding_id"]
+    
+    embedding_status = "unknown"
+    if embedding_id in embedding_storage:
+        embedding_status = embedding_storage[embedding_id]["status"]
+    
+    return {
+        "video_id": video_id,
+        "filename": video_data["filename"],
+        "status": video_data["status"],
+        "embedding_status": embedding_status,
+        "duration": video_data.get("duration"),
+        "upload_timestamp": video_data["upload_timestamp"]
+    }
 
 # Custom 404 handler
 @app.exception_handler(404)

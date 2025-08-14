@@ -10,6 +10,7 @@ __pycache__/
 test_vids/
 backend/sage.db
 backend/server.log
+*.db
 
 ############################
 # FRONTEND

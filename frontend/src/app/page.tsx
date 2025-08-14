@@ -10,7 +10,10 @@ interface LocalVideo {
   id: string;
   file: File;
   thumbnail: string;
-  embeddings?: unknown;
+  video_id?: string;
+  embedding_id?: string;
+  status: 'uploading' | 'processing' | 'ready' | 'error';
+  error?: string;
 }
 
 export default function LandingPage() {
@@ -90,7 +93,8 @@ export default function LandingPage() {
     const newVideo: LocalVideo = {
       id: `video-${Date.now()}`,
       file,
-      thumbnail
+      thumbnail,
+      status: 'uploading'
     };
     
     setUploadedVideos(prev => [...prev, newVideo]);
@@ -151,13 +155,22 @@ export default function LandingPage() {
         [uploadedVideos[1].id]: 'Video 2 ready!'
       });
       
+      // Update videos with backend IDs
+      setUploadedVideos(prev => prev.map(v => 
+        v.id === uploadedVideos[0].id 
+          ? { ...v, video_id: result1.video_id, embedding_id: result1.embedding_id, status: 'processing' }
+          : v.id === uploadedVideos[1].id
+          ? { ...v, video_id: result2.video_id, embedding_id: result2.embedding_id, status: 'processing' }
+          : v
+      ));
+      
       // Store video data in session storage for analysis page
       sessionStorage.setItem('video1_data', JSON.stringify({
         id: uploadedVideos[0].id,
         filename: uploadedVideos[0].file.name,
         embedding_id: result1.embedding_id,
         video_id: result1.video_id,
-        duration: result1.duration
+        status: 'processing'
       }));
       
       sessionStorage.setItem('video2_data', JSON.stringify({
@@ -165,11 +178,11 @@ export default function LandingPage() {
         filename: uploadedVideos[1].file.name,
         embedding_id: result2.embedding_id,
         video_id: result2.video_id,
-        duration: result2.duration
+        status: 'processing'
       }));
       
-      // Navigate to analysis page
-      window.location.href = '/analysis';
+      // Start polling for completion
+      startStatusPolling(result1.embedding_id, result2.embedding_id);
     } catch (error) {
       console.error('Error generating embeddings:', error);
       setError('Failed to process videos. Please try again.');
@@ -177,6 +190,44 @@ export default function LandingPage() {
     } finally {
       setIsGeneratingEmbeddings(false);
     }
+  };
+
+  const startStatusPolling = async (embeddingId1: string, embeddingId2: string) => {
+    const checkStatus = async () => {
+      try {
+        const status1 = await api.getEmbeddingStatus(embeddingId1, apiKey);
+        const status2 = await api.getEmbeddingStatus(embeddingId2, apiKey);
+        
+        // Update progress based on status
+        setEmbeddingProgress(prev => ({
+          ...prev,
+          [uploadedVideos[0].id]: `Video 1: ${status1.status}`,
+          [uploadedVideos[1].id]: `Video 2: ${status2.status}`
+        }));
+        
+        // Check if both are ready
+        if (status1.status === 'completed' && status2.status === 'completed') {
+          setEmbeddingProgress({
+            [uploadedVideos[0].id]: 'Video 1 ready!',
+            [uploadedVideos[1].id]: 'Video 2 ready!'
+          });
+          
+          // Navigate to analysis page
+          window.location.href = '/analysis';
+          return;
+        }
+        
+        // Continue polling if not ready
+        setTimeout(checkStatus, 5000); // Check every 5 seconds
+        
+      } catch (error) {
+        console.error('Error checking status:', error);
+        setError('Error checking video status');
+      }
+    };
+    
+    // Start polling
+    setTimeout(checkStatus, 2000); // Start after 2 seconds
   };
 
   if (isLoading) {
@@ -322,11 +373,11 @@ export default function LandingPage() {
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   {Object.keys(embeddingProgress).length > 0 
-                    ? 'Processing Videos...' 
+                    ? 'Uploading & Processing...' 
                     : 'Starting...'}
                 </>
               ) : (
-                'Compare Videos'
+                'Upload & Start Processing'
               )}
             </Button>
           </div>

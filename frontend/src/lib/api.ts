@@ -50,13 +50,13 @@ export const api = {
     }, key);
   },
 
-  // Upload video and generate embeddings
+  // Upload video to S3 and start embedding generation
   uploadAndGenerateEmbeddings: async (formData: FormData, apiKey?: string): Promise<{
-    embeddings: unknown;
+    message: string;
     filename: string;
-    duration: number;
-    embedding_id: string;
     video_id: string;
+    embedding_id: string;
+    status: string;
   }> => {
     const headers: Record<string, string> = {};
     const keyToUse = apiKey || localStorage.getItem('sage_api_key');
@@ -77,6 +77,43 @@ export const api = {
     }
 
     return response.json();
+  },
+
+  // Check video status
+  getVideoStatus: async (videoId: string, apiKey?: string): Promise<{
+    video_id: string;
+    filename: string;
+    status: string;
+    embedding_status: string;
+    duration?: number;
+    upload_timestamp: string;
+  }> => {
+    return apiRequest(`/video-status/${videoId}`, {
+      method: 'GET',
+    }, apiKey);
+  },
+
+  // Check embedding status
+  getEmbeddingStatus: async (embeddingId: string, apiKey?: string): Promise<{
+    embedding_id: string;
+    filename: string;
+    status: string;
+    duration?: number;
+    completed_at?: string;
+    error?: string;
+  }> => {
+    return apiRequest(`/embedding-status/${embeddingId}`, {
+      method: 'GET',
+    }, apiKey);
+  },
+
+  // Get video URL (presigned S3 URL)
+  getVideoUrl: async (videoId: string, apiKey?: string): Promise<{
+    video_url: string;
+  }> => {
+    return apiRequest(`/serve-video/${videoId}`, {
+      method: 'GET',
+    }, apiKey);
   },
 
   // Compare local videos
