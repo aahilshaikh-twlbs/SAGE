@@ -28,14 +28,15 @@ export default function LandingPage() {
       try {
         const storedKey = localStorage.getItem('sage_api_key');
         if (storedKey) {
-          const result = await api.validateApiKey(storedKey);
-          if (result.isValid) {
+          // Temporarily disable auto-validation to prevent 422 errors
+          // const result = await api.validateApiKey(storedKey);
+          // if (result.isValid) {
             setApiKey(storedKey);
             setShowApiKeyConfig(false);
-          } else {
-            localStorage.removeItem('sage_api_key');
-            setShowApiKeyConfig(true);
-          }
+          // } else {
+          //   localStorage.removeItem('sage_api_key');
+          //   setShowApiKeyConfig(true);
+          // }
         } else {
           setShowApiKeyConfig(true);
         }

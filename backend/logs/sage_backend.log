@@ -15,3 +15,11 @@
 2025-08-14 01:51:21 - __main__ - INFO - startup_event:58 - CORS origins: ['http://localhost:3000', 'https://tl-sage.vercel.app', 'http://209.38.142.207:8000']
 2025-08-14 01:51:21 - __main__ - INFO - startup_event:59 - Database path: sage.db
 2025-08-14 01:51:21 - __main__ - INFO - startup_event:60 - ============================================================
+2025-08-14 01:52:35 - __main__ - WARNING - log_requests:122 - 13.57.203.92 - POST /validate-key - 422 (0.001s)
+2025-08-14 01:52:35 - __main__ - WARNING - log_requests:122 - 13.57.203.92 - POST /validate-key - 422 (0.001s)
+2025-08-14 01:52:35 - __main__ - WARNING - log_requests:122 - 52.53.225.240 - POST /validate-key - 422 (0.001s)
+2025-08-14 01:52:35 - __main__ - WARNING - log_requests:122 - 52.53.225.240 - POST /validate-key - 422 (0.001s)
+2025-08-14 01:52:36 - __main__ - WARNING - log_requests:122 - 52.53.225.240 - POST /validate-key - 422 (0.001s)
+2025-08-14 01:52:36 - __main__ - WARNING - log_requests:122 - 54.153.15.85 - POST /validate-key - 422 (0.001s)
+2025-08-14 01:52:36 - __main__ - WARNING - log_requests:122 - 13.57.203.92 - POST /validate-key - 422 (0.001s)
+2025-08-14 01:52:36 - __main__ - WARNING - log_requests:122 - 13.57.203.92 - POST /validate-key - 422 (0.001s)
