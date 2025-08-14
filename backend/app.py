@@ -490,18 +490,36 @@ async def validate_api_key(request: ApiKeyValidation):
 @app.post("/upload-and-generate-embeddings")
 @log_errors
 async def upload_and_generate_embeddings(
-    file: UploadFile = File(...),
+    request: Request,
     tl: TwelveLabs = Depends(get_twelve_labs_client)
 ):
-    logger.info(f"Starting video upload and embedding generation for file: {file.filename}")
-    logger.debug(f"File details: size={file.size}, content_type={file.content_type}")
+    logger.info("Starting video upload and embedding generation")
+    logger.debug(f"Request content type: {request.headers.get('content-type', 'Unknown')}")
     
     tmp_file_path = None
     try:
-        # Read file content
-        logger.debug("Reading uploaded file content...")
-        content = await file.read()
-        logger.debug(f"File content read successfully, size: {len(content)} bytes")
+        # Parse FormData manually
+        logger.debug("Parsing FormData from request...")
+        form_data = await request.form()
+        
+        # Extract file from FormData
+        if 'file' not in form_data:
+            logger.error("No 'file' field found in FormData")
+            raise HTTPException(status_code=400, detail="No file field found in request")
+        
+        file_item = form_data['file']
+        logger.debug(f"File item type: {type(file_item)}")
+        
+        # Handle both UploadFile and SpooledTemporaryFile
+        if hasattr(file_item, 'filename'):
+            filename = file_item.filename
+            content = await file_item.read()
+        else:
+            # Handle case where file might be a string or other type
+            logger.error(f"Unexpected file type: {type(file_item)}")
+            raise HTTPException(status_code=400, detail=f"Invalid file type: {type(file_item)}")
+        
+        logger.debug(f"File details: filename={filename}, size={len(content)} bytes")
         
         # Create temporary file
         logger.debug("Creating temporary file...")
@@ -511,7 +529,7 @@ async def upload_and_generate_embeddings(
         logger.debug(f"Temporary file created: {tmp_file_path}")
         
         # Create embedding task
-        logger.info(f"Creating embedding task for file: {file.filename}")
+        logger.info(f"Creating embedding task for file: {filename}")
         logger.debug(f"Using model: Marengo-retrieval-2.7, clip_length: 2")
         
         task = tl.embed.task.create(
@@ -553,7 +571,7 @@ async def upload_and_generate_embeddings(
         
         # Store in memory
         embedding_storage[embedding_id] = {
-            "filename": file.filename,
+            "filename": filename,
             "embeddings": completed_task.video_embedding,
             "duration": duration
         }
@@ -562,11 +580,11 @@ async def upload_and_generate_embeddings(
         logger.debug(f"video_storage keys: {list(video_storage.keys())}")
         
         logger.info(f"Video upload and embedding generation completed successfully")
-        logger.info(f"File: {file.filename}, Duration: {duration}s, Embedding ID: {embedding_id}")
+        logger.info(f"File: {filename}, Duration: {duration}s, Embedding ID: {embedding_id}")
         
         return {
             "embeddings": completed_task.video_embedding,
-            "filename": file.filename,
+            "filename": filename,
             "duration": duration,
             "embedding_id": embedding_id,
             "video_id": video_id
@@ -576,7 +594,7 @@ async def upload_and_generate_embeddings(
         logger.error(f"Error generating embeddings: {e}")
         logger.error(f"Error type: {type(e).__name__}")
         logger.error(f"Error traceback: {traceback.format_exc()}")
-        logger.error(f"File details: filename={file.filename}, size={getattr(file, 'size', 'Unknown')}")
+        logger.error(f"File details: filename={filename if 'filename' in locals() else 'Unknown'}, size={len(content) if 'content' in locals() else 'Unknown'}")
         
         # Clean up temporary file on error
         if tmp_file_path and os.path.exists(tmp_file_path):
