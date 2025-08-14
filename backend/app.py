@@ -43,11 +43,15 @@ formatter = PSTFormatter(
 )
 handler.setFormatter(formatter)
 
-# Configure logger
+# Configure logger - only use our custom handler
 logger = logging.getLogger(__name__)
 logger.handlers.clear()  # Remove default handlers
 logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+
+# Disable duplicate logging from other modules
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('uvicorn').setLevel(logging.WARNING)
 
 app = FastAPI(title="SAGE Backend", version="2.0.0")
 
@@ -430,6 +434,7 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, tl: TwelveLa
         
         # Create embedding task using presigned URL
         logger.info(f"Creating TwelveLabs embedding task: embedding_id='{embedding_id}', model='Marengo-retrieval-2.7'")
+        logger.info(f"Using presigned URL for TwelveLabs: {presigned_url[:100]}...")
         start_time = datetime.now()
         
         task = tl.embed.task.create(
