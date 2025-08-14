@@ -104,7 +104,7 @@ conn.close()
 
 # S3 Configuration
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "tl-sage-bucket")
-S3_REGION = os.getenv("S3_REGION", "us-west-2")  # Changed to match your SSO region
+S3_REGION = os.getenv("S3_REGION", "us-east-2")  # Bucket is actually in us-east-2
 S3_PROFILE = os.getenv("S3_PROFILE", "dev")  # Use the dev profile
 
 # Initialize S3 client using AWS profile
@@ -363,10 +363,13 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, tl: TwelveLa
         # Update status
         embedding_storage[embedding_id]["status"] = "processing"
         
-        # Create embedding task using S3 URL
+        # Generate presigned URL for TwelveLabs to access the video
+        presigned_url = get_s3_presigned_url(s3_url)
+        
+        # Create embedding task using presigned URL
         task = tl.embed.task.create(
             model_name="Marengo-retrieval-2.7",
-            video_url=s3_url,  # Use S3 URL instead of local file
+            video_url=presigned_url,  # Use presigned HTTPS URL
             video_clip_length=2,
             video_embedding_scopes=["clip", "video"]
         )
