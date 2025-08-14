@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
     ],
   },
   async rewrites() {
+    // Updated backend proxy configuration - points to correct backend IP
     const backendUrl = process.env.BACKEND_URL || 'http://209.38.142.207:8000';
     return [
       {
