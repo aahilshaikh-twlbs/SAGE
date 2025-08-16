@@ -6,7 +6,7 @@ export interface ApiKeyResponse {
 }
 
 export interface VideoUploadResponse {
-  embeddings: any;
+  embeddings: Record<string, unknown>;
   filename: string;
   duration: number;
   embedding_id: string;

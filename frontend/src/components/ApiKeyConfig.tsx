@@ -33,7 +33,7 @@ export function ApiKeyConfig({ onKeyValidated }: ApiKeyConfigProps) {
         setValidationResult('error');
         setErrorMessage('Invalid API key. Please check your key and try again.');
       }
-    } catch (error) {
+    } catch {
       setValidationResult('error');
       setErrorMessage('Failed to validate API key. Please check your connection and try again.');
     } finally {
@@ -102,7 +102,7 @@ export function ApiKeyConfig({ onKeyValidated }: ApiKeyConfigProps) {
         </form>
         
         <div className="mt-6 text-xs text-sage-300 text-center">
-          <p>Don't have an API key?</p>
+          <p>Don&apos;t have an API key?</p>
           <a
             href="https://twelvelabs.io/"
             target="_blank"

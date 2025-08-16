@@ -20,12 +20,9 @@ interface LocalVideo {
 
 export default function LandingPage() {
   const router = useRouter();
-  const [apiKey, setApiKey] = useState('');
   const [showApiKeyConfig, setShowApiKeyConfig] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [uploadedVideos, setUploadedVideos] = useState<LocalVideo[]>([]);
-  const [isGeneratingEmbeddings, setIsGeneratingEmbeddings] = useState(false);
-  const [embeddingProgress, setEmbeddingProgress] = useState<{[key: string]: string}>({});
   const [error, setError] = useState<string | null>(null);
 
   // Check for stored API key on component mount
@@ -36,7 +33,6 @@ export default function LandingPage() {
         if (storedKey) {
           const result = await api.validateApiKey(storedKey);
           if (result.isValid) {
-            setApiKey(storedKey);
             setShowApiKeyConfig(false);
           } else {
             localStorage.removeItem('sage_api_key');
@@ -56,7 +52,6 @@ export default function LandingPage() {
   }, []);
 
   const handleKeyValidated = (key: string) => {
-    setApiKey(key);
     localStorage.setItem('sage_api_key', key);
     setShowApiKeyConfig(false);
   };
@@ -263,6 +258,7 @@ export default function LandingPage() {
                       key={video.id}
                       className="flex items-center gap-4 p-4 border border-sage-200 rounded-lg"
                     >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={video.thumbnail}
                         alt="Video thumbnail"
