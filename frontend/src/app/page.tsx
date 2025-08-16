@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { ApiKeyConfig } from '@/components/ApiKeyConfig';
 import { Button } from '@/components/ui/button';
-import { Settings, Video, Loader2, X } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api';
+import { Video, Loader2, X, Play, Upload } from 'lucide-react';
 
 interface LocalVideo {
   id: string;
@@ -17,6 +19,7 @@ interface LocalVideo {
 }
 
 export default function LandingPage() {
+  const router = useRouter();
   const [apiKey, setApiKey] = useState('');
   const [showApiKeyConfig, setShowApiKeyConfig] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,173 +101,101 @@ export default function LandingPage() {
     };
     
     setUploadedVideos(prev => [...prev, newVideo]);
+    
+    try {
+      const result = await api.uploadVideo(file);
+      
+      setUploadedVideos(prev => prev.map(video => 
+        video.id === newVideo.id 
+          ? { ...video, status: 'processing', video_id: result.video_id, embedding_id: result.embedding_id }
+          : video
+      ));
+      
+      // Simulate processing time
+      setTimeout(() => {
+        setUploadedVideos(prev => prev.map(video => 
+          video.id === newVideo.id 
+            ? { ...video, status: 'ready' }
+            : video
+        ));
+      }, 2000);
+      
+    } catch (error) {
+      console.error('Upload failed:', error);
+      setUploadedVideos(prev => prev.map(video => 
+        video.id === newVideo.id 
+          ? { ...video, status: 'error', error: 'Upload failed' }
+          : video
+      ));
+    }
+    
+    // Reset file input
+    event.target.value = '';
   };
 
   const removeVideo = (videoId: string) => {
-    setUploadedVideos(prev => prev.filter(v => v.id !== videoId));
+    setUploadedVideos(prev => prev.filter(video => video.id !== videoId));
   };
 
-  const canRunComparison = () => {
-    return uploadedVideos.length === 2 && !isGeneratingEmbeddings;
-  };
-
-  const handleRunComparison = async () => {
-    if (uploadedVideos.length !== 2) return;
-    
-    setIsGeneratingEmbeddings(true);
-    setError(null);
-    
-    try {
-      // Reset progress
-      setEmbeddingProgress({});
-      
-      // Upload videos and generate embeddings
-      const formData1 = new FormData();
-      formData1.append('file', uploadedVideos[0].file);
-      
-      const formData2 = new FormData();
-      formData2.append('file', uploadedVideos[1].file);
-      
-      // Track progress for each video
-      setEmbeddingProgress({
-        [uploadedVideos[0].id]: 'Uploading video 1...',
-        [uploadedVideos[1].id]: 'Uploading video 2...'
-      });
-      
-      // Upload and generate embeddings for both videos
-      const [result1, result2] = await Promise.all([
-        api.uploadAndGenerateEmbeddings(formData1).then(result => {
-          setEmbeddingProgress(prev => ({
-            ...prev,
-            [uploadedVideos[0].id]: 'Generating embeddings for video 1...'
-          }));
-          return result;
-        }),
-        api.uploadAndGenerateEmbeddings(formData2).then(result => {
-          setEmbeddingProgress(prev => ({
-            ...prev,
-            [uploadedVideos[1].id]: 'Generating embeddings for video 2...'
-          }));
-          return result;
-        })
-      ]);
-      
-      // Update progress
-      setEmbeddingProgress({
-        [uploadedVideos[0].id]: 'Video 1 ready!',
-        [uploadedVideos[1].id]: 'Video 2 ready!'
-      });
-      
-      // Update videos with backend IDs
-      setUploadedVideos(prev => prev.map(v => 
-        v.id === uploadedVideos[0].id 
-          ? { ...v, video_id: result1.video_id, embedding_id: result1.embedding_id, status: 'processing' }
-          : v.id === uploadedVideos[1].id
-          ? { ...v, video_id: result2.video_id, embedding_id: result2.embedding_id, status: 'processing' }
-          : v
-      ));
-      
-      // Store video data in session storage for analysis page
-      sessionStorage.setItem('video1_data', JSON.stringify({
-        id: uploadedVideos[0].id,
-        filename: uploadedVideos[0].file.name,
-        embedding_id: result1.embedding_id,
-        video_id: result1.video_id,
-        status: 'processing'
-      }));
-      
-      sessionStorage.setItem('video2_data', JSON.stringify({
-        id: uploadedVideos[1].id,
-        filename: uploadedVideos[1].file.name,
-        embedding_id: result2.embedding_id,
-        video_id: result2.video_id,
-        status: 'processing'
-      }));
-      
-      // Start polling for completion
-      startStatusPolling(result1.embedding_id, result2.embedding_id);
-    } catch (error) {
-      console.error('Error generating embeddings:', error);
-      setError('Failed to process videos. Please try again.');
-      setEmbeddingProgress({});
-    } finally {
-      setIsGeneratingEmbeddings(false);
+  const startComparison = () => {
+    const readyVideos = uploadedVideos.filter(video => video.status === 'ready');
+    if (readyVideos.length !== 2) {
+      setError('Please upload and process 2 videos before starting comparison');
+      return;
     }
-  };
-
-  const startStatusPolling = async (embeddingId1: string, embeddingId2: string) => {
-    const checkStatus = async () => {
-      try {
-        const status1 = await api.getEmbeddingStatus(embeddingId1, apiKey);
-        const status2 = await api.getEmbeddingStatus(embeddingId2, apiKey);
-        
-        // Update progress based on status
-        setEmbeddingProgress(prev => ({
-          ...prev,
-          [uploadedVideos[0].id]: `Video 1: ${status1.status}`,
-          [uploadedVideos[1].id]: `Video 2: ${status2.status}`
-        }));
-        
-        // Check if both are ready
-        if (status1.status === 'completed' && status2.status === 'completed') {
-          setEmbeddingProgress({
-            [uploadedVideos[0].id]: 'Video 1 ready!',
-            [uploadedVideos[1].id]: 'Video 2 ready!'
-          });
-          
-          // Navigate to analysis page
-          window.location.href = '/analysis';
-          return;
-        }
-        
-        // Continue polling if not ready
-        setTimeout(checkStatus, 5000); // Check every 5 seconds
-        
-      } catch (error) {
-        console.error('Error checking status:', error);
-        setError('Error checking video status');
-      }
-    };
     
-    // Start polling
-    setTimeout(checkStatus, 2000); // Start after 2 seconds
+    // Store video data in session storage for analysis page
+    readyVideos.forEach((video, index) => {
+      sessionStorage.setItem(`video${index + 1}_data`, JSON.stringify({
+        id: video.id,
+        filename: video.file.name,
+        embedding_id: video.embedding_id,
+        video_id: video.video_id,
+        duration: 60 // Mock duration
+      }));
+    });
+    
+    router.push('/analysis');
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F4F3F3] flex items-center justify-center p-4">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0066FF]"></div>
+      <div className="min-h-screen bg-sage-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-sage-500" />
+          <p className="text-sage-400">Loading SAGE...</p>
+        </div>
       </div>
     );
   }
 
-  if (!apiKey || showApiKeyConfig) {
+  if (showApiKeyConfig) {
     return (
-      <div className="min-h-screen bg-[#F4F3F3] flex items-center justify-center p-4">
-        <ApiKeyConfig 
-          onKeyValidated={handleKeyValidated}
-          onCancel={() => setShowApiKeyConfig(false)}
-          showCancel={!!apiKey}
-        />
+      <div className="min-h-screen bg-sage-50 flex items-center justify-center p-4">
+        <ApiKeyConfig onKeyValidated={handleKeyValidated} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F3F3]">
+    <div className="min-h-screen bg-sage-50">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-[#D3D1CF]">
+      <header className="bg-white shadow-sm border-b border-sage-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <h1 className="text-xl font-semibold text-[#1D1C1B]">SAGE</h1>
+            <div className="flex items-center gap-4">
+              <div className="w-8 h-8 bg-sage-500 rounded-lg flex items-center justify-center">
+                <Video className="w-5 h-5 text-white" />
+              </div>
+              <h1 className="text-xl font-semibold text-sage-400">SAGE</h1>
+            </div>
             
             <Button
               onClick={() => setShowApiKeyConfig(true)}
               variant="outline"
               size="sm"
-              className="flex items-center gap-2 border-[#D3D1CF] hover:bg-[#F4F3F3]"
+              className="border-sage-200 hover:bg-sage-50 text-sage-400"
             >
-              <Settings className="w-4 h-4" />
               Change API Key
             </Button>
           </div>
@@ -272,127 +203,150 @@ export default function LandingPage() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-6 py-12">
-        <div className="space-y-10">
-          {/* Upload Section */}
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-[#1D1C1B] mb-4">
-              Upload Videos for Comparison
-            </h2>
-            <p className="text-[#9B9896] mb-8">
-              Upload two local videos to compare their content using TwelveLabs embeddings
-            </p>
-          </div>
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        <div className="text-center mb-8">
+          <h2 className="text-3xl font-bold text-sage-400 mb-4">
+            AI-Powered Video Comparison
+          </h2>
+          <p className="text-lg text-sage-300 max-w-2xl mx-auto">
+            Upload two videos and let our AI analyze them for differences using TwelveLabs embeddings.
+          </p>
+        </div>
 
-          {/* Video Upload Area */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            {uploadedVideos.map((video, index) => (
-              <div key={video.id} className="relative">
-                <div className="bg-white rounded-lg shadow-sm border border-[#D3D1CF] p-4 h-full min-h-[300px] flex flex-col">
-                  <div className="relative flex-grow">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={video.thumbnail}
-                      alt={`Video ${index + 1}`}
-                      className="w-full h-full object-cover rounded"
-                    />
-                    <button
-                      onClick={() => removeVideo(video.id)}
-                      className="absolute top-2 right-2 bg-[#EF4444] text-white rounded-full p-1 hover:bg-[#DC2626]"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="mt-3">
-                    <p className="text-sm font-medium truncate text-[#1D1C1B]">{video.file.name}</p>
-                    <p className="text-xs text-[#9B9896]">
-                      Size: {(video.file.size / 1024 / 1024).toFixed(2)} MB
-                    </p>
-                    {embeddingProgress[video.id] && (
-                      <p className="text-xs text-[#0066FF] mt-1 font-medium">
-                        {embeddingProgress[video.id]}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {uploadedVideos.length < 2 && (
-              <div 
-                className="bg-white rounded-lg shadow-sm border-2 border-dashed border-[#D3D1CF] p-8 flex flex-col items-center justify-center min-h-[300px] transition-colors"
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.currentTarget.classList.add('border-[#0066FF]', 'bg-blue-50');
-                }}
-                onDragLeave={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.currentTarget.classList.remove('border-[#0066FF]', 'bg-blue-50');
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.currentTarget.classList.remove('border-[#0066FF]', 'bg-blue-50');
-                  
-                  const files = e.dataTransfer.files;
-                  if (files && files.length > 0 && files[0].type.startsWith('video/')) {
-                    const mockEvent = {
-                      target: { files }
-                    } as React.ChangeEvent<HTMLInputElement>;
-                    handleVideoUpload(mockEvent);
-                  }
-                }}
-              >
-                <Video className="w-16 h-16 text-[#9B9896] mb-4" />
-                <label className="cursor-pointer">
-                  <span className="text-[#0066FF] hover:text-[#0052CC] font-medium text-lg">
-                    Choose video
-                  </span>
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleVideoUpload}
-                    className="hidden"
-                  />
+        {/* Upload Section */}
+        <div className="max-w-4xl mx-auto">
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Upload className="w-5 h-5" />
+                Upload Videos
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center">
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={handleVideoUpload}
+                  className="hidden"
+                  id="video-upload"
+                  disabled={uploadedVideos.length >= 2}
+                />
+                <label
+                  htmlFor="video-upload"
+                  className={`inline-flex items-center gap-2 px-6 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
+                    uploadedVideos.length >= 2
+                      ? 'border-sage-200 text-sage-300 cursor-not-allowed'
+                      : 'border-sage-300 text-sage-400 hover:border-sage-500 hover:text-sage-500'
+                  }`}
+                >
+                  <Video className="w-5 h-5" />
+                  {uploadedVideos.length >= 2 ? 'Maximum videos reached' : 'Choose video file'}
                 </label>
-                <p className="text-sm text-[#9B9896] mt-2">or drag and drop</p>
+                <p className="text-sm text-sage-300 mt-2">
+                  MP4 format recommended. Maximum 2 videos.
+                </p>
               </div>
-            )}
-          </div>
+            </CardContent>
+          </Card>
 
-          {/* Comparison Button */}
-          <div className="flex justify-center">
-            <Button
-              onClick={handleRunComparison}
-              disabled={!canRunComparison()}
-              className="px-8 py-3 bg-[#0066FF] hover:bg-[#0052CC] text-white disabled:bg-[#D3D1CF] disabled:text-[#9B9896]"
-            >
-              {isGeneratingEmbeddings ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  {Object.keys(embeddingProgress).length > 0 
-                    ? 'Uploading & Processing...' 
-                    : 'Starting...'}
-                </>
-              ) : (
-                'Upload & Start Processing'
-              )}
-            </Button>
-          </div>
+          {/* Video List */}
+          {uploadedVideos.length > 0 && (
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle>Uploaded Videos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {uploadedVideos.map((video) => (
+                    <div
+                      key={video.id}
+                      className="flex items-center gap-4 p-4 border border-sage-200 rounded-lg"
+                    >
+                      <img
+                        src={video.thumbnail}
+                        alt="Video thumbnail"
+                        className="w-20 h-12 object-cover rounded"
+                      />
+                      <div className="flex-1">
+                        <h4 className="font-medium text-sage-400">{video.file.name}</h4>
+                        <p className="text-sm text-sage-300">
+                          {video.file.size > 1024 * 1024
+                            ? `${(video.file.size / (1024 * 1024)).toFixed(1)} MB`
+                            : `${(video.file.size / 1024).toFixed(1)} KB`
+                          }
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        {video.status === 'uploading' && (
+                          <div className="flex items-center gap-2 text-sage-500">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Uploading...
+                          </div>
+                        )}
+                        {video.status === 'processing' && (
+                          <div className="flex items-center gap-2 text-sage-500">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Processing...
+                          </div>
+                        )}
+                        {video.status === 'ready' && (
+                          <div className="flex items-center gap-2 text-green-600">
+                            <Play className="w-4 h-4" />
+                            Ready
+                          </div>
+                        )}
+                        {video.status === 'error' && (
+                          <div className="flex items-center gap-2 text-red-600">
+                            <X className="w-4 h-4" />
+                            {video.error}
+                          </div>
+                        )}
+                        
+                        <Button
+                          onClick={() => removeVideo(video.id)}
+                          variant="outline"
+                          size="sm"
+                          className="border-sage-200 hover:bg-sage-50 text-sage-400"
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Status Messages */}
+          {/* Error Display */}
           {error && (
-            <div className="max-w-4xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-center text-red-600">{error}</p>
+            <div className="mb-8 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-red-600">{error}</p>
+              <Button
+                onClick={() => setError(null)}
+                variant="outline"
+                size="sm"
+                className="mt-2 border-red-200 hover:bg-red-50 text-red-600"
+              >
+                Dismiss
+              </Button>
             </div>
           )}
-          
-          {uploadedVideos.length === 1 && !error && (
-            <p className="text-center text-[#9B9896]">
-              Please upload one more video to enable comparison
-            </p>
+
+          {/* Start Comparison Button */}
+          {uploadedVideos.filter(v => v.status === 'ready').length === 2 && (
+            <div className="text-center">
+              <Button
+                onClick={startComparison}
+                size="lg"
+                className="bg-sage-500 hover:bg-sage-600 text-white px-8 py-3"
+              >
+                <Play className="w-5 h-5 mr-2" />
+                Start Comparison
+              </Button>
+            </div>
           )}
         </div>
       </main>

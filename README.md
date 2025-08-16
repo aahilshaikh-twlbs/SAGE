@@ -1,162 +1,171 @@
 # SAGE - Video Comparison with AI Embeddings
 
-SAGE is a video comparison application that uses TwelveLabs AI embeddings to analyze and compare video content. Videos are uploaded to S3 storage and processed asynchronously for optimal performance.
+A modern, AI-powered video comparison application that leverages TwelveLabs AI embeddings to analyze and compare video content at the segment level.
 
-## Features
+## 🚀 Features
 
-- **S3 Integration**: Videos are uploaded directly to AWS S3 for scalable storage
-- **Async Processing**: Embedding generation happens in the background without blocking the user
-- **Real-time Status**: Polling system to track video processing progress
-- **AI-powered Comparison**: Uses TwelveLabs Marengo-retrieval-2.7 model for video analysis
-- **Modern UI**: Clean, responsive interface built with Next.js and Tailwind CSS
+- **AI-Powered Video Analysis** - Uses TwelveLabs Marengo-retrieval-2.7 model
+- **Real-Time Video Processing** - Asynchronous embedding generation with progress tracking
+- **Segment-Level Comparison** - Identifies differences at precise timestamps
+- **Synchronized Video Playback** - Side-by-side video comparison with timeline markers
+- **Drag & Drop Interface** - Modern upload experience with video thumbnails
+- **Configurable Thresholds** - Adjustable sensitivity for difference detection
+- **Visual Timeline** - Color-coded difference markers on synchronized video timeline
 
-## Architecture
+## 🏗️ Architecture
 
-### Backend (FastAPI)
-- **Upload Flow**: Videos uploaded to S3 → Embedding generation started asynchronously
-- **Storage**: S3 for video files, in-memory for embeddings and metadata
-- **API Endpoints**:
-  - `POST /upload-and-generate-embeddings` - Upload video and start processing
-  - `GET /video-status/{video_id}` - Check video processing status
-  - `GET /embedding-status/{embedding_id}` - Check embedding generation status
-  - `GET /serve-video/{video_id}` - Get presigned S3 URL for video playback
-  - `POST /compare-local-videos` - Compare two processed videos
+- **Frontend**: Next.js 15 with React 19, TypeScript, and Tailwind CSS
+- **Backend**: FastAPI with Python 3.12+
+- **AI Service**: TwelveLabs API integration
+- **Database**: SQLite for API key storage
+- **Storage**: In-memory for videos and embeddings
 
-### Frontend (Next.js)
-- **Async Workflow**: Upload → Processing → Ready for comparison
-- **Status Polling**: Automatic checking of video processing status
-- **Progress Tracking**: Real-time updates on video processing stages
-
-## Setup
+## 📦 Installation
 
 ### Prerequisites
-- Python 3.8+
+
+- Python 3.12+
 - Node.js 18+
-- AWS S3 bucket
 - TwelveLabs API key
+- Git
 
 ### Backend Setup
-1. Navigate to `backend/` directory
-2. Copy `.env.example` to `.env` and fill in your credentials:
-   ```bash
-   S3_BUCKET_NAME=tl-sage-bucket
-   S3_REGION=us-east-1
-   S3_ACCESS_KEY=your_aws_access_key
-   S3_SECRET_KEY=your_aws_secret_key
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Run the backend:
-   ```bash
-   uvicorn app:app --host 0.0.0.0 --port 8000
-   ```
+
+```bash
+cd SAGE_new/backend
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Set environment variables
+export TWELVELABS_API_KEY="your_api_key"
+
+# Run backend
+python app.py
+```
+
+The backend will be available at `http://localhost:8000`
 
 ### Frontend Setup
-1. Navigate to `frontend/` directory
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Run the development server:
-   ```bash
-   npm run dev
-   ```
 
-## Usage
+```bash
+cd SAGE_new/frontend
 
-1. **Configure API Key**: Enter your TwelveLabs API key in the frontend
-2. **Upload Videos**: Upload two videos (MP4 format recommended)
-3. **Start Processing**: Click "Upload & Start Processing" to begin
-4. **Monitor Progress**: Watch real-time status updates
-5. **Compare Videos**: Once processing is complete, videos are ready for comparison
-6. **Analysis**: Navigate to the analysis page to compare video content
+# Install dependencies
+npm install
 
-## Workflow
+# Set environment variables (optional)
+export NEXT_PUBLIC_API_URL="http://localhost:8000"
 
-1. **Upload**: Video files are uploaded to S3 bucket
-2. **Processing**: Embedding generation starts asynchronously using S3 URLs
-3. **Status Updates**: Frontend polls backend for processing status
-4. **Completion**: Once both videos are processed, comparison is enabled
-5. **Analysis**: AI-powered comparison of video segments
-
-## API Reference
-
-### Upload Video
-```http
-POST /upload-and-generate-embeddings
-Content-Type: multipart/form-data
-X-API-Key: your_twelvelabs_api_key
-
-Response:
-{
-  "message": "Video uploaded successfully. Embedding generation in progress.",
-  "filename": "video.mp4",
-  "video_id": "video_uuid",
-  "embedding_id": "embed_uuid",
-  "status": "processing"
-}
+# Run development server
+npm run dev
 ```
 
-### Check Video Status
-```http
-GET /video-status/{video_id}
-X-API-Key: your_twelvelabs_api_key
+The frontend will be available at `http://localhost:3000`
 
-Response:
-{
-  "video_id": "video_uuid",
-  "filename": "video.mp4",
-  "status": "ready",
-  "embedding_status": "completed",
-  "duration": 120.5,
-  "upload_timestamp": "2024-01-01T12:00:00"
-}
-```
+## 🔑 Configuration
 
-### Get Video URL
-```http
-GET /serve-video/{video_id}
-X-API-Key: your_twelvelabs_api_key
+1. **Get TwelveLabs API Key**: Sign up at [twelvelabs.io](https://twelvelabs.io/)
+2. **Set Environment Variable**: `export TWELVELABS_API_KEY="your_key"`
+3. **Start Backend**: Run `python app.py` in the backend directory
+4. **Start Frontend**: Run `npm run dev` in the frontend directory
+5. **Configure API Key**: Enter your API key in the SAGE interface
 
-Response:
-{
-  "video_url": "https://presigned-s3-url..."
-}
-```
+## 📱 Usage
 
-## Environment Variables
+### 1. Upload Videos
+- Navigate to the main page
+- Upload up to 2 video files (MP4 recommended)
+- Wait for AI processing to complete
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `S3_BUCKET_NAME` | S3 bucket for video storage | `tl-sage-bucket` |
-| `S3_REGION` | AWS region for S3 | `us-east-1` |
-| `S3_ACCESS_KEY` | AWS access key ID | Required |
-| `S3_SECRET_KEY` | AWS secret access key | Required |
+### 2. Start Comparison
+- Click "Start Comparison" when both videos are ready
+- Navigate to the analysis page
 
-## Security
+### 3. Analyze Differences
+- Use synchronized video players for side-by-side comparison
+- Adjust similarity threshold for different sensitivity levels
+- Click on timeline markers to jump to specific differences
+- View detailed difference statistics in the right panel
 
-- API keys are validated against TwelveLabs
-- S3 presigned URLs expire after 1 hour
-- CORS configured for specific origins
-- Input validation and sanitization
+## 🎨 UI Components
 
-## Troubleshooting
+- **ApiKeyConfig**: API key input and validation
+- **Video Upload**: Drag & drop interface with thumbnails
+- **Video Player**: Synchronized dual video playback
+- **Timeline**: Interactive timeline with difference markers
+- **Settings Panel**: Threshold adjustment and configuration
+
+## 🔧 API Endpoints
+
+- `POST /validate-key` - Validate TwelveLabs API key
+- `POST /upload-and-generate-embeddings` - Upload and process video
+- `POST /compare-local-videos` - Compare two videos
+- `GET /serve-video/{video_id}` - Stream video content
+- `GET /health` - Server health check
+
+## 🎯 Key Features
+
+### Analysis Tab Layout
+The analysis page features:
+- **Side-by-side video players** with synchronized controls
+- **Visual timeline** with color-coded difference markers
+- **Real-time threshold adjustment** for comparison sensitivity
+- **Difference list** with clickable segments
+- **Statistics panel** showing comparison metrics
+
+### Video Synchronization
+- Play/pause controls synchronized between both players
+- Timeline scrubbing updates both videos simultaneously
+- Current time display and progress tracking
+- Difference markers overlay on timeline
+
+### Threshold Controls
+- Adjustable similarity threshold (0.01 - 0.5)
+- Real-time comparison updates
+- Visual feedback on difference sensitivity
+- Preset threshold options
+
+## 🚧 Current Limitations
+
+- In-memory storage (videos lost on server restart)
+- Single server deployment
+- 2-video comparison limit
+- Mock embedding data for demonstration
+
+## 🔮 Future Enhancements
+
+- Persistent storage with PostgreSQL
+- User management and authentication
+- Export features for comparison reports
+- Batch processing for multiple videos
+- S3 integration for scalable storage
+- Redis caching for performance optimization
+
+## 🐛 Troubleshooting
 
 ### Common Issues
-1. **S3 Upload Failed**: Check AWS credentials and bucket permissions
-2. **Embedding Generation Failed**: Verify TwelveLabs API key and quota
-3. **Video Not Playing**: Check if presigned URL has expired
 
-### Logs
-Backend logs are available in the console and include:
-- Request/response logging
-- S3 operation status
-- Embedding generation progress
-- Error details with stack traces
+1. **API Key Validation Fails**
+   - Verify TwelveLabs API key is valid
+   - Check API key has sufficient quota
+   - Ensure network connectivity
 
-## Contributing
+2. **Video Upload Fails**
+   - Check file format (MP4 recommended)
+   - Verify file size limits
+   - Ensure backend is running
+
+3. **Comparison Results Empty**
+   - Adjust similarity threshold
+   - Check video quality and duration
+   - Verify embedding generation completed
+
+## 📄 License
+
+This project is licensed under the MIT License.
+
+## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -164,6 +173,6 @@ Backend logs are available in the console and include:
 4. Test thoroughly
 5. Submit a pull request
 
-## License
+---
 
-This project is licensed under the MIT License.
+**SAGE** - Making AI-powered video comparison accessible and intuitive.

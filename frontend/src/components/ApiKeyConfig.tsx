@@ -2,100 +2,117 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Key, Eye, EyeOff } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api';
+import { Key, Loader2, CheckCircle, XCircle } from 'lucide-react';
 
 interface ApiKeyConfigProps {
   onKeyValidated: (key: string) => void;
-  onCancel?: () => void;
-  showCancel?: boolean;
 }
 
-export function ApiKeyConfig({ onKeyValidated, onCancel, showCancel = false }: ApiKeyConfigProps) {
+export function ApiKeyConfig({ onKeyValidated }: ApiKeyConfigProps) {
   const [apiKey, setApiKey] = useState('');
-  const [showKey, setShowKey] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
-  const [error, setError] = useState('');
+  const [validationResult, setValidationResult] = useState<'idle' | 'success' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const handleValidateKey = async () => {
-    if (!apiKey.trim()) {
-      setError('Please enter an API key');
-      return;
-    }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apiKey.trim()) return;
 
     setIsValidating(true);
-    setError('');
+    setValidationResult('idle');
+    setErrorMessage('');
 
     try {
       const result = await api.validateApiKey(apiKey);
       if (result.isValid) {
-        onKeyValidated(apiKey);
+        setValidationResult('success');
+        setTimeout(() => onKeyValidated(apiKey), 1000);
       } else {
-        setError('Invalid API key');
+        setValidationResult('error');
+        setErrorMessage('Invalid API key. Please check your key and try again.');
       }
-    } catch {
-      setError('Failed to validate API key. Please try again.');
+    } catch (error) {
+      setValidationResult('error');
+      setErrorMessage('Failed to validate API key. Please check your connection and try again.');
     } finally {
       setIsValidating(false);
     }
   };
 
   return (
-    <div className="w-full max-w-lg mx-auto p-10 bg-white rounded-lg shadow-lg border border-[#D3D1CF]">
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-3">
-          <Key className="w-6 h-6 text-[#0066FF]" />
-          <h2 className="text-2xl font-semibold text-[#1D1C1B]">Configure API Key</h2>
+    <Card className="w-full max-w-md mx-auto">
+      <CardHeader className="text-center">
+        <div className="mx-auto mb-4 w-16 h-16 bg-sage-500/10 rounded-full flex items-center justify-center">
+          <Key className="w-8 h-8 text-sage-500" />
         </div>
-        {showCancel && onCancel && (
-          <button
-            onClick={onCancel}
-            className="text-[#9B9896] hover:text-[#1D1C1B] text-sm font-medium"
-          >
-            Cancel
-          </button>
-        )}
-      </div>
-      
-      <div className="space-y-8">
-        <div>
-          <label className="block text-sm font-medium text-[#1D1C1B] mb-3">
-            TwelveLabs API Key
-          </label>
-          <div className="relative">
+        <CardTitle className="text-2xl font-bold text-sage-400">
+          Welcome to SAGE
+        </CardTitle>
+        <CardDescription className="text-sage-300">
+          AI-powered video comparison with TwelveLabs
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="api-key" className="block text-sm font-medium text-sage-400 mb-2">
+              TwelveLabs API Key
+            </label>
             <input
-              type={showKey ? 'text' : 'password'}
+              id="api-key"
+              type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your TwelveLabs API key"
-              className="w-full px-4 py-4 text-base border border-[#D3D1CF] rounded-md focus:outline-none focus:ring-2 focus:ring-[#0066FF] focus:border-transparent bg-white text-[#1D1C1B] pr-12"
+              placeholder="Enter your API key"
+              className="w-full px-3 py-2 border border-sage-200 rounded-md bg-white text-sage-400 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-500 focus:border-transparent"
+              required
             />
-            <button
-              type="button"
-              onClick={() => setShowKey(!showKey)}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[#9B9896] hover:text-[#1D1C1B] p-1"
-            >
-              {showKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
           </div>
-        </div>
-
-        {error && (
-          <p className="text-[#EF4444] text-sm bg-[#FEE2E2] p-3 rounded-md">{error}</p>
-        )}
-
-        <Button
-          onClick={handleValidateKey}
-          disabled={isValidating}
-          className="w-full bg-[#0066FF] hover:bg-[#0052CC] text-white disabled:bg-[#D3D1CF] disabled:text-[#9B9896] py-4 text-base font-medium"
-        >
-          {isValidating ? 'Validating...' : 'Validate & Continue'}
-        </Button>
+          
+          {validationResult === 'error' && (
+            <div className="flex items-center gap-2 text-red-600 text-sm">
+              <XCircle className="w-4 h-4" />
+              {errorMessage}
+            </div>
+          )}
+          
+          {validationResult === 'success' && (
+            <div className="flex items-center gap-2 text-green-600 text-sm">
+              <CheckCircle className="w-4 h-4" />
+              API key validated successfully!
+            </div>
+          )}
+          
+          <Button
+            type="submit"
+            disabled={isValidating || !apiKey.trim()}
+            className="w-full bg-sage-500 hover:bg-sage-600 text-white disabled:opacity-50"
+          >
+            {isValidating ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Validating...
+              </>
+            ) : (
+              'Validate & Continue'
+            )}
+          </Button>
+        </form>
         
-        <p className="text-sm text-[#9B9896] text-center mt-6">
-          Your API key will be stored locally in your browser
-        </p>
-      </div>
-    </div>
+        <div className="mt-6 text-xs text-sage-300 text-center">
+          <p>Don't have an API key?</p>
+          <a
+            href="https://twelvelabs.io/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sage-500 hover:text-sage-400 underline"
+          >
+            Get one from TwelveLabs
+          </a>
+        </div>
+      </CardContent>
+    </Card>
   );
-} 
+}

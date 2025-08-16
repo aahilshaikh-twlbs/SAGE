@@ -2,97 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 214, 219, 220;
+  --background-end-rgb: 255, 255, 255;
+}
+
+@media (prefers-color-scheme: dark) {
   :root {
-    /* TwelveLabs Brand Colors */
-    --tl-charcoal: #1D1C1B;
-    --tl-white: #F4F3F3;
-    --tl-light-grey: #D3D1CF;
-    --tl-medium-grey: #9B9896;
-    --tl-dark-grey: #3A3938;
-    
-    /* Primary Colors from Brand */
-    --tl-blue: #0066FF;
-    --tl-green: #00CC88;
-    --tl-orange: #FF6B35;
-    --tl-purple: #8B5CF6;
-    --tl-pink: #EC4899;
-    
-    /* Extended Palette */
-    --tl-cyan: #06B6D4;
-    --tl-yellow: #FBBF24;
-    --tl-red: #EF4444;
-    
-    /* Application colors */
-    --background: var(--tl-white);
-    --foreground: var(--tl-charcoal);
-    --card: var(--tl-white);
-    --card-foreground: var(--tl-charcoal);
-    --popover: var(--tl-white);
-    --popover-foreground: var(--tl-charcoal);
-    --primary: var(--tl-blue);
-    --primary-foreground: var(--tl-white);
-    --secondary: var(--tl-light-grey);
-    --secondary-foreground: var(--tl-charcoal);
-    --muted: var(--tl-light-grey);
-    --muted-foreground: var(--tl-medium-grey);
-    --accent: var(--tl-green);
-    --accent-foreground: var(--tl-white);
-    --destructive: var(--tl-red);
-    --destructive-foreground: var(--tl-white);
-    --border: var(--tl-light-grey);
-    --input: var(--tl-light-grey);
-    --ring: var(--tl-blue);
-    
-    /* Corner radius following 30% rule */
-    --radius: 0.5rem;
-  }
-  
-  .dark {
-    --background: var(--tl-charcoal);
-    --foreground: var(--tl-white);
-    --card: var(--tl-dark-grey);
-    --card-foreground: var(--tl-white);
-    --popover: var(--tl-dark-grey);
-    --popover-foreground: var(--tl-white);
-    --primary: var(--tl-blue);
-    --primary-foreground: var(--tl-white);
-    --secondary: var(--tl-dark-grey);
-    --secondary-foreground: var(--tl-white);
-    --muted: var(--tl-dark-grey);
-    --muted-foreground: var(--tl-medium-grey);
-    --accent: var(--tl-green);
-    --accent-foreground: var(--tl-charcoal);
-    --destructive: var(--tl-red);
-    --destructive-foreground: var(--tl-white);
-    --border: var(--tl-dark-grey);
-    --input: var(--tl-dark-grey);
-    --ring: var(--tl-blue);
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 0, 0, 0;
+    --background-end-rgb: 0, 0, 0;
   }
 }
 
-@layer base {
-  * {
-    border-color: var(--border);
-  }
-  body {
-    background-color: var(--background);
-    color: var(--foreground);
-    font-feature-settings: "rlig" 1, "calt" 1;
-  }
+body {
+  color: rgb(var(--foreground-rgb));
+  background: linear-gradient(
+      to bottom,
+      transparent,
+      rgb(var(--background-end-rgb))
+    )
+    rgb(var(--background-start-rgb));
 }
 
-/* Custom utility classes for TwelveLabs brand */
 @layer utilities {
-  .rounded-tl {
-    border-radius: 30%;
-  }
-  
-  .rounded-tl-sm {
-    border-radius: 15%;
-  }
-  
-  .rounded-tl-lg {
-    border-radius: 45%;
+  .text-balance {
+    text-wrap: balance;
   }
 }

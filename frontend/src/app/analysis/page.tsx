@@ -41,7 +41,7 @@ export default function AnalysisPage() {
     try {
       setIsLoading(true);
       setError(null);
-      const comparison = await api.compareLocalVideos(
+      const comparison = await api.compareVideos(
         video1.embedding_id,
         video2.embedding_id,
         thresholdValue
@@ -122,15 +122,15 @@ export default function AnalysisPage() {
 
   const getSeverityColor = (distance: number, isFullVideo: boolean = false) => {
     // Special color for full video comparison
-    if (isFullVideo) return 'bg-[#9B9896]'; // Medium grey for overall comparison
+    if (isFullVideo) return 'bg-sage-300'; // Medium grey for overall comparison
     
-    if (distance === Infinity) return 'bg-[#DC2626]'; // Dark Red for missing segments
-    if (distance > 0.4) return 'bg-[#EF4444]'; // Red for major differences
-    if (distance > 0.3) return 'bg-[#F97316]'; // Orange for significant differences
-    if (distance > 0.2) return 'bg-[#F59E0B]'; // Amber for moderate differences
-    if (distance > 0.1) return 'bg-[#EAB308]'; // Yellow for minor differences
-    if (distance > 0.05) return 'bg-[#84CC16]'; // Lime for very minor differences
-    return 'bg-[#06B6D4]'; // Cyan for minimal differences
+    if (distance === Infinity) return 'bg-red-800'; // Dark Red for missing segments
+    if (distance > 0.4) return 'bg-red-500'; // Red for major differences
+    if (distance > 0.3) return 'bg-orange-500'; // Orange for significant differences
+    if (distance > 0.2) return 'bg-amber-500'; // Amber for moderate differences
+    if (distance > 0.1) return 'bg-yellow-500'; // Yellow for minor differences
+    if (distance > 0.05) return 'bg-lime-500'; // Lime for very minor differences
+    return 'bg-cyan-500'; // Cyan for minimal differences
   };
 
   const formatTime = (seconds: number) => {
@@ -141,12 +141,12 @@ export default function AnalysisPage() {
 
   if (error || !video1Data || !video2Data) {
     return (
-      <div className="min-h-screen bg-[#F4F3F3] flex items-center justify-center">
+      <div className="min-h-screen bg-sage-50 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-[#EF4444] mb-4">{error || 'Failed to load video data'}</p>
+          <p className="text-red-600 mb-4">{error || 'Failed to load video data'}</p>
           <Button 
             onClick={() => router.push('/')}
-            className="bg-[#0066FF] hover:bg-[#0052CC] text-white"
+            className="bg-sage-500 hover:bg-sage-600 text-white"
           >
             Back to Upload
           </Button>
@@ -160,9 +160,9 @@ export default function AnalysisPage() {
     : '0';
 
   return (
-    <div className="min-h-screen bg-[#F4F3F3] text-[#1D1C1B]">
+    <div className="min-h-screen bg-sage-50 text-sage-400">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-[#D3D1CF]">
+      <header className="bg-white shadow-sm border-b border-sage-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
@@ -170,7 +170,7 @@ export default function AnalysisPage() {
                 onClick={() => router.push('/')}
                 variant="outline"
                 size="sm"
-                className="flex items-center gap-2 border-[#D3D1CF] hover:bg-[#F4F3F3]"
+                className="flex items-center gap-2 border-sage-200 hover:bg-sage-50"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Back to Upload
@@ -182,7 +182,7 @@ export default function AnalysisPage() {
               onClick={() => setShowThresholdSettings(!showThresholdSettings)}
               variant="outline"
               size="sm"
-              className="flex items-center gap-2 border-[#D3D1CF] hover:bg-[#F4F3F3]"
+              className="flex items-center gap-2 border-sage-200 hover:bg-sage-50"
             >
               <Settings className="w-4 h-4" />
               Threshold Settings
@@ -196,7 +196,7 @@ export default function AnalysisPage() {
         {/* Threshold Settings Modal */}
         {showThresholdSettings && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <Card className="p-6 bg-white border-[#D3D1CF]">
+            <Card className="p-6 bg-white border-sage-200">
               <h3 className="text-lg font-semibold mb-4">Adjust Comparison Threshold</h3>
               <div className="space-y-4">
                 <div>
@@ -210,28 +210,28 @@ export default function AnalysisPage() {
                     step="0.01"
                     value={threshold}
                     onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                    className="w-full accent-[#0066FF]"
+                    className="w-full accent-sage-500"
                   />
-                  <div className="flex justify-between text-xs text-[#9B9896] mt-1">
+                  <div className="flex justify-between text-xs text-sage-300 mt-1">
                     <span>More sensitive</span>
                     <span>Less sensitive</span>
                   </div>
                 </div>
-                <p className="text-sm text-[#9B9896]">
+                <p className="text-sm text-sage-300">
                   Lower values detect more subtle differences. Higher values only show major differences.
                 </p>
                 <div className="flex gap-2">
                   <Button 
                     onClick={handleThresholdChange}
                     disabled={isLoading}
-                    className="flex-1 bg-[#0066FF] hover:bg-[#0052CC] text-white"
+                    className="flex-1 bg-sage-500 hover:bg-sage-600 text-white"
                   >
                     Apply
                   </Button>
                   <Button 
                     onClick={() => setShowThresholdSettings(false)}
                     variant="outline"
-                    className="flex-1 border-[#D3D1CF] hover:bg-[#F4F3F3]"
+                    className="flex-1 border-sage-200 hover:bg-sage-50"
                   >
                     Cancel
                   </Button>
@@ -245,8 +245,8 @@ export default function AnalysisPage() {
           {/* Video Players - Larger */}
           <div className="lg:col-span-3 space-y-4">
             <div className="grid grid-cols-2 gap-6">
-              <div className="bg-white rounded-lg p-4 shadow-sm border border-[#D3D1CF]">
-                <h3 className="text-sm font-medium mb-3 text-[#9B9896]">{video1Data.filename}</h3>
+              <div className="bg-white rounded-lg p-4 shadow-sm border border-sage-200">
+                <h3 className="text-sm font-medium mb-3 text-sage-300">{video1Data.filename}</h3>
                 <video
                   ref={video1Ref}
                   src={`${API_BASE_URL}/serve-video/${video1Data.video_id}`}
@@ -255,8 +255,8 @@ export default function AnalysisPage() {
                   controls={false}
                 />
               </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm border border-[#D3D1CF]">
-                <h3 className="text-sm font-medium mb-3 text-[#9B9896]">{video2Data.filename}</h3>
+              <div className="bg-white rounded-lg p-4 shadow-sm border border-sage-200">
+                <h3 className="text-sm font-medium mb-3 text-sage-300">{video2Data.filename}</h3>
                 <video
                   ref={video2Ref}
                   src={`${API_BASE_URL}/serve-video/${video2Data.video_id}`}
@@ -267,16 +267,16 @@ export default function AnalysisPage() {
             </div>
 
             {/* Video Controls */}
-            <div className="bg-white p-4 rounded-lg shadow-sm border border-[#D3D1CF]">
+            <div className="bg-white p-4 rounded-lg shadow-sm border border-sage-200">
               <div className="flex items-center gap-4 mb-3">
                 <Button
                   onClick={handlePlayPause}
                   size="sm"
-                  className="bg-[#0066FF] hover:bg-[#0052CC] text-white"
+                  className="bg-sage-500 hover:bg-sage-600 text-white"
                 >
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </Button>
-                <span className="text-sm font-medium text-[#1D1C1B]">
+                <span className="text-sm font-medium text-sage-400">
                   {formatTime(currentTime)} / {formatTime(video1Data.duration)}
                 </span>
               </div>
@@ -284,7 +284,7 @@ export default function AnalysisPage() {
               {/* Timeline with Markers */}
               <div className="relative space-y-2">
                 {/* Difference visualization bar */}
-                <div className="relative h-8 bg-[#F4F3F3] rounded overflow-hidden">
+                <div className="relative h-8 bg-sage-50 rounded overflow-hidden">
                   {differences.map((diff, index) => {
                     const startPercent = (diff.start_sec / video1Data.duration) * 100;
                     const widthPercent = ((diff.end_sec - diff.start_sec) / video1Data.duration) * 100;
@@ -308,14 +308,14 @@ export default function AnalysisPage() {
                   {Array.from({ length: 5 }, (_, i) => (
                     <div
                       key={i}
-                      className="absolute top-0 h-full w-px bg-[#D3D1CF] opacity-30"
+                      className="absolute top-0 h-full w-px bg-sage-200 opacity-30"
                       style={{ left: `${(i + 1) * 20}%` }}
                     />
                   ))}
                 </div>
                 
                 {/* Main playback track */}
-                <div className="relative h-3 bg-[#E5E5E5] rounded-full cursor-pointer group"
+                <div className="relative h-3 bg-sage-100 rounded-full cursor-pointer group"
                      onClick={(e) => {
                        const rect = e.currentTarget.getBoundingClientRect();
                        const percent = (e.clientX - rect.left) / rect.width;
@@ -323,7 +323,7 @@ export default function AnalysisPage() {
                      }}>
                   {/* Progress bar */}
                   <div 
-                    className="absolute h-full bg-[#0066FF] rounded-full transition-all duration-100"
+                    className="absolute h-full bg-sage-500 rounded-full transition-all duration-100"
                     style={{ width: `${(currentTime / video1Data.duration) * 100}%` }}
                   />
                   
@@ -334,13 +334,13 @@ export default function AnalysisPage() {
                   
                   {/* Current time indicator */}
                   <div 
-                    className="absolute w-5 h-5 bg-white border-[3px] border-[#0066FF] rounded-full -translate-x-1/2 -translate-y-1/2 top-1/2 shadow-lg transition-all duration-100 z-10 hover:scale-110"
+                    className="absolute w-5 h-5 bg-white border-[3px] border-sage-500 rounded-full -translate-x-1/2 -translate-y-1/2 top-1/2 shadow-lg transition-all duration-100 z-10 hover:scale-110"
                     style={{ left: `${(currentTime / video1Data.duration) * 100}%` }}
                   />
                 </div>
                 
                 {/* Time labels */}
-                <div className="flex justify-between text-xs text-[#9B9896] select-none">
+                <div className="flex justify-between text-xs text-sage-300 select-none">
                   <span>0:00</span>
                   <span>{formatTime(video1Data.duration / 2)}</span>
                   <span>{formatTime(video1Data.duration)}</span>
@@ -351,20 +351,20 @@ export default function AnalysisPage() {
 
           {/* Differences List - Narrower */}
           <div className="lg:col-span-1">
-            <Card className="p-4 bg-white border-[#D3D1CF] h-full">
+            <Card className="p-4 bg-white border-sage-200 h-full">
               <h2 className="text-lg font-semibold mb-4">
                 Detected Differences ({differences.length})
               </h2>
               
               {isLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0066FF]"></div>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sage-500"></div>
                 </div>
               ) : (
                 <>
                   <div className="space-y-2 max-h-[400px] overflow-y-auto mb-4">
                     {differences.length === 0 ? (
-                      <p className="text-[#9B9896] text-center py-8">
+                      <p className="text-sage-300 text-center py-8">
                         No significant differences found
                       </p>
                     ) : (
@@ -376,8 +376,8 @@ export default function AnalysisPage() {
                             key={index}
                             className={`p-3 rounded-lg cursor-pointer transition-colors ${
                               isFullVideo 
-                                ? 'bg-[#E5E5E5] hover:bg-[#D3D1CF] border border-[#D3D1CF]' 
-                                : 'bg-[#F4F3F3] hover:bg-[#D3D1CF]'
+                                ? 'bg-sage-100 hover:bg-sage-200 border border-sage-200' 
+                                : 'bg-sage-50 hover:bg-sage-200'
                             }`}
                             onClick={() => seekToTime(diff.start_sec)}
                           >
@@ -390,7 +390,7 @@ export default function AnalysisPage() {
                               </Badge>
                             </div>
                             {isFullVideo && (
-                              <div className="mt-1 text-xs text-[#9B9896]">Overall comparison</div>
+                              <div className="mt-1 text-xs text-sage-300">Overall comparison</div>
                             )}
                           </div>
                         );
@@ -399,24 +399,24 @@ export default function AnalysisPage() {
                   </div>
 
                   {/* Summary */}
-                  <div className="pt-4 border-t border-[#D3D1CF]">
+                  <div className="pt-4 border-t border-sage-200">
                     <div className="text-sm space-y-1">
                       <p className="flex justify-between">
-                        <span className="text-[#9B9896]">Total segments:</span>
+                        <span className="text-sage-300">Total segments:</span>
                         <span className="font-medium">{totalSegments}</span>
                       </p>
                       <p className="flex justify-between">
-                        <span className="text-[#9B9896]">Different segments:</span>
+                        <span className="text-sage-300">Different segments:</span>
                         <span className="font-medium">
                           {differences.filter(d => !(d.start_sec === 0 && d.end_sec >= (video1Data?.duration || 0) - 1)).length}
                         </span>
                       </p>
                       <p className="flex justify-between">
-                        <span className="text-[#9B9896]">Similarity:</span>
-                        <span className="font-medium text-[#00CC88]">{similarityPercent}%</span>
+                        <span className="text-sage-300">Similarity:</span>
+                        <span className="font-medium text-green-600">{similarityPercent}%</span>
                       </p>
                       <p className="flex justify-between">
-                        <span className="text-[#9B9896]">Threshold:</span>
+                        <span className="text-sage-300">Threshold:</span>
                         <span className="font-medium">{threshold.toFixed(2)}</span>
                       </p>
                     </div>
