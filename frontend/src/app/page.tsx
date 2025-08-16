@@ -6,7 +6,7 @@ import { ApiKeyConfig } from '@/components/ApiKeyConfig';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api';
-import { Video, Loader2, X, Play, Upload } from 'lucide-react';
+import { Video, Loader2, X, Play, Upload, CheckCircle, AlertCircle } from 'lucide-react';
 
 interface LocalVideo {
   id: string;
@@ -16,6 +16,7 @@ interface LocalVideo {
   embedding_id?: string;
   status: 'uploading' | 'processing' | 'ready' | 'error';
   error?: string;
+  duration?: number;
 }
 
 export default function LandingPage() {
@@ -50,6 +51,42 @@ export default function LandingPage() {
 
     checkStoredApiKey();
   }, []);
+
+  // Poll for video status updates
+  useEffect(() => {
+    if (uploadedVideos.length === 0) return;
+
+    const pollStatus = async () => {
+      const updatedVideos = [...uploadedVideos];
+      let hasChanges = false;
+
+      for (let i = 0; i < updatedVideos.length; i++) {
+        const video = updatedVideos[i];
+        if (video.video_id && video.status === 'processing') {
+          try {
+            const status = await api.getVideoStatus(video.video_id);
+            if (status.status !== video.status || status.duration !== video.duration) {
+              updatedVideos[i] = {
+                ...video,
+                status: status.status === 'ready' ? 'ready' : 'processing',
+                duration: status.duration
+              };
+              hasChanges = true;
+            }
+          } catch (error) {
+            console.error('Error checking video status:', error);
+          }
+        }
+      }
+
+      if (hasChanges) {
+        setUploadedVideos(updatedVideos);
+      }
+    };
+
+    const interval = setInterval(pollStatus, 5000); // Poll every 5 seconds
+    return () => clearInterval(interval);
+  }, [uploadedVideos]);
 
   const handleKeyValidated = (key: string) => {
     localStorage.setItem('sage_api_key', key);
@@ -106,15 +143,6 @@ export default function LandingPage() {
           : video
       ));
       
-      // Simulate processing time
-      setTimeout(() => {
-        setUploadedVideos(prev => prev.map(video => 
-          video.id === newVideo.id 
-            ? { ...video, status: 'ready' }
-            : video
-        ));
-      }, 2000);
-      
     } catch (error) {
       console.error('Upload failed:', error);
       setUploadedVideos(prev => prev.map(video => 
@@ -146,7 +174,7 @@ export default function LandingPage() {
         filename: video.file.name,
         embedding_id: video.embedding_id,
         video_id: video.video_id,
-        duration: 60 // Mock duration
+        duration: video.duration || 60
       }));
     });
     
@@ -272,6 +300,11 @@ export default function LandingPage() {
                             : `${(video.file.size / 1024).toFixed(1)} KB`
                           }
                         </p>
+                        {video.duration && (
+                          <p className="text-sm text-sage-300">
+                            Duration: {Math.floor(video.duration / 60)}:{(video.duration % 60).toFixed(0).padStart(2, '0')}
+                          </p>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-2">
@@ -289,13 +322,13 @@ export default function LandingPage() {
                         )}
                         {video.status === 'ready' && (
                           <div className="flex items-center gap-2 text-green-600">
-                            <Play className="w-4 h-4" />
+                            <CheckCircle className="w-4 h-4" />
                             Ready
                           </div>
                         )}
                         {video.status === 'error' && (
                           <div className="flex items-center gap-2 text-red-600">
-                            <X className="w-4 h-4" />
+                            <AlertCircle className="w-4 h-4" />
                             {video.error}
                           </div>
                         )}

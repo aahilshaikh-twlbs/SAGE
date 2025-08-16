@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { api, API_BASE_URL } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Play, Pause, Settings } from 'lucide-react';
+import { api } from '@/lib/api';
+import { ArrowLeft, Play, Pause, RotateCcw, Settings, Loader2 } from 'lucide-react';
 
 interface VideoData {
   id: string;
@@ -22,115 +22,124 @@ interface Difference {
   distance: number;
 }
 
+interface ComparisonResult {
+  filename1: string;
+  filename2: string;
+  differences: Difference[];
+  total_segments: number;
+  differing_segments: number;
+  threshold_used: number;
+}
+
 export default function AnalysisPage() {
   const router = useRouter();
-  const [video1Data, setVideo1Data] = useState<VideoData | null>(null);
-  const [video2Data, setVideo2Data] = useState<VideoData | null>(null);
-  const [differences, setDifferences] = useState<Difference[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [video1, setVideo1] = useState<VideoData | null>(null);
+  const [video2, setVideo2] = useState<VideoData | null>(null);
+  const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
+  const [isComparing, setIsComparing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [threshold, setThreshold] = useState(0.05);
-  const [showThresholdSettings, setShowThresholdSettings] = useState(false);
-  const [totalSegments, setTotalSegments] = useState(0);
-  const video1Ref = useRef<HTMLVideoElement>(null);
-  const video2Ref = useRef<HTMLVideoElement>(null);
+  const [threshold, setThreshold] = useState(0.1);
+  const [distanceMetric, setDistanceMetric] = useState<'cosine' | 'euclidean'>('cosine');
+  const [showSettings, setShowSettings] = useState(false);
 
-  const loadComparison = async (video1: VideoData, video2: VideoData, thresholdValue: number) => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const comparison = await api.compareVideos(
-        video1.embedding_id,
-        video2.embedding_id,
-        thresholdValue
-      );
-      
-      setDifferences(comparison.differences);
-      setTotalSegments(comparison.total_segments);
-    } catch (err) {
-      console.error('Error loading comparison:', err);
-      setError('Failed to load comparison data. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Video player states
+  const [isPlaying1, setIsPlaying1] = useState(false);
+  const [isPlaying2, setIsPlaying2] = useState(false);
+  const [currentTime1, setCurrentTime1] = useState(0);
+  const [currentTime2, setCurrentTime2] = useState(0);
+  const [duration1, setDuration1] = useState(0);
+  const [duration2, setDuration2] = useState(0);
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        // Get video data from session storage
-        const video1Str = sessionStorage.getItem('video1_data');
-        const video2Str = sessionStorage.getItem('video2_data');
-        
-        if (!video1Str || !video2Str) {
-          setError('No video data found. Please upload videos first.');
-          return;
-        }
-        
-        const video1 = JSON.parse(video1Str) as VideoData;
-        const video2 = JSON.parse(video2Str) as VideoData;
-        
-        setVideo1Data(video1);
-        setVideo2Data(video2);
-        
-        // Compare videos with default threshold
-        await loadComparison(video1, video2, threshold);
-      } catch (err) {
-        console.error('Error loading data:', err);
-        setError('Failed to load comparison data');
-      }
-    };
-    
-    loadData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // Load video data from session storage
+    const video1Data = sessionStorage.getItem('video1_data');
+    const video2Data = sessionStorage.getItem('video2_data');
 
-  const handleThresholdChange = async () => {
-    if (video1Data && video2Data) {
-      await loadComparison(video1Data, video2Data, threshold);
-      setShowThresholdSettings(false);
+    if (!video1Data || !video2Data) {
+      setError('Video data not found. Please upload videos first.');
+      return;
+    }
+
+    try {
+      setVideo1(JSON.parse(video1Data));
+      setVideo2(JSON.parse(video2Data));
+    } catch (error) {
+      setError('Invalid video data. Please upload videos again.');
+    }
+  }, []);
+
+  const handleCompare = async () => {
+    if (!video1 || !video2) return;
+
+    setIsComparing(true);
+    setError(null);
+
+    try {
+      const result = await api.compareVideos(
+        video1.embedding_id,
+        video2.embedding_id,
+        threshold,
+        distanceMetric
+      );
+      setComparisonResult(result);
+    } catch (error) {
+      console.error('Comparison failed:', error);
+      setError('Failed to compare videos. Please try again.');
+    } finally {
+      setIsComparing(false);
     }
   };
 
-  const handlePlayPause = () => {
-    if (video1Ref.current && video2Ref.current) {
-      if (isPlaying) {
-        video1Ref.current.pause();
-        video2Ref.current.pause();
+  const handleVideo1TimeUpdate = (event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const video = event.currentTarget;
+    setCurrentTime1(video.currentTime);
+    setDuration1(video.duration);
+  };
+
+  const handleVideo2TimeUpdate = (event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const video = event.currentTarget;
+    setCurrentTime2(video.currentTime);
+    setDuration2(video.duration);
+  };
+
+  const togglePlay1 = () => {
+    const video = document.getElementById('video1') as HTMLVideoElement;
+    if (video) {
+      if (isPlaying1) {
+        video.pause();
+        setIsPlaying1(false);
       } else {
-        video1Ref.current.play();
-        video2Ref.current.play();
+        video.play();
+        setIsPlaying1(true);
       }
-      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const togglePlay2 = () => {
+    const video = document.getElementById('video2') as HTMLVideoElement;
+    if (video) {
+      if (isPlaying2) {
+        video.pause();
+        setIsPlaying2(false);
+      } else {
+        video.play();
+        setIsPlaying2(true);
+      }
     }
   };
 
   const seekToTime = (time: number) => {
-    if (video1Ref.current && video2Ref.current) {
-      video1Ref.current.currentTime = time;
-      video2Ref.current.currentTime = time;
-      setCurrentTime(time);
-    }
-  };
-
-  const handleTimeUpdate = () => {
-    if (video1Ref.current) {
-      setCurrentTime(video1Ref.current.currentTime);
-    }
-  };
-
-  const getSeverityColor = (distance: number, isFullVideo: boolean = false) => {
-    // Special color for full video comparison
-    if (isFullVideo) return 'bg-sage-300'; // Medium grey for overall comparison
+    const video1 = document.getElementById('video1') as HTMLVideoElement;
+    const video2 = document.getElementById('video2') as HTMLVideoElement;
     
-    if (distance === Infinity) return 'bg-red-800'; // Dark Red for missing segments
-    if (distance > 0.4) return 'bg-red-500'; // Red for major differences
-    if (distance > 0.3) return 'bg-orange-500'; // Orange for significant differences
-    if (distance > 0.2) return 'bg-amber-500'; // Amber for moderate differences
-    if (distance > 0.1) return 'bg-yellow-500'; // Yellow for minor differences
-    if (distance > 0.05) return 'bg-lime-500'; // Lime for very minor differences
-    return 'bg-cyan-500'; // Cyan for minimal differences
+    if (video1) {
+      video1.currentTime = time;
+      setCurrentTime1(time);
+    }
+    if (video2) {
+      video2.currentTime = time;
+      setCurrentTime2(time);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -139,293 +148,252 @@ export default function AnalysisPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  if (error || !video1Data || !video2Data) {
+  if (error) {
     return (
       <div className="min-h-screen bg-sage-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-600 mb-4">{error || 'Failed to load video data'}</p>
-          <Button 
-            onClick={() => router.push('/')}
-            className="bg-sage-500 hover:bg-sage-600 text-white"
-          >
-            Back to Upload
-          </Button>
-        </div>
+        <Card className="max-w-md">
+          <CardContent className="p-6 text-center">
+            <p className="text-red-600 mb-4">{error}</p>
+            <Button onClick={() => router.push('/')} className="bg-sage-500 hover:bg-sage-600">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Upload
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
-  const similarityPercent = totalSegments > 0 
-    ? ((1 - differences.length / totalSegments) * 100).toFixed(1)
-    : '0';
+  if (!video1 || !video2) {
+    return (
+      <div className="min-h-screen bg-sage-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-sage-500" />
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-sage-50 text-sage-400">
+    <div className="min-h-screen bg-sage-50">
       {/* Header */}
       <header className="bg-white shadow-sm border-b border-sage-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-4">
-              <Button
-                onClick={() => router.push('/')}
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-2 border-sage-200 hover:bg-sage-50"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                Back to Upload
-              </Button>
-              <h1 className="text-xl font-semibold">Video Comparison Analysis</h1>
-            </div>
-            
             <Button
-              onClick={() => setShowThresholdSettings(!showThresholdSettings)}
+              onClick={() => router.push('/')}
               variant="outline"
               size="sm"
-              className="flex items-center gap-2 border-sage-200 hover:bg-sage-50"
+              className="border-sage-200 hover:bg-sage-50 text-sage-400"
             >
-              <Settings className="w-4 h-4" />
-              Threshold Settings
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Upload
             </Button>
+            
+            <div className="flex items-center gap-4">
+              <Button
+                onClick={() => setShowSettings(!showSettings)}
+                variant="outline"
+                size="sm"
+                className="border-sage-200 hover:bg-sage-50 text-sage-400"
+              >
+                <Settings className="w-4 h-4 mr-2" />
+                Settings
+              </Button>
+              
+              <Button
+                onClick={handleCompare}
+                disabled={isComparing}
+                className="bg-sage-500 hover:bg-sage-600 text-white"
+              >
+                {isComparing ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                )}
+                {isComparing ? 'Comparing...' : 'Compare Videos'}
+              </Button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Threshold Settings Modal */}
-        {showThresholdSettings && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <Card className="p-6 bg-white border-sage-200">
-              <h3 className="text-lg font-semibold mb-4">Adjust Comparison Threshold</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Video 1 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sage-400">{video1.filename}</CardTitle>
+            </CardHeader>
+            <CardContent>
               <div className="space-y-4">
+                <video
+                  id="video1"
+                  className="w-full rounded-lg"
+                  onTimeUpdate={handleVideo1TimeUpdate}
+                  onPlay={() => setIsPlaying1(true)}
+                  onPause={() => setIsPlaying1(false)}
+                  controls
+                >
+                  <source src={`/api/serve-video/${video1.video_id}`} type="video/mp4" />
+                  Your browser does not support the video tag.
+                </video>
+                
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-sage-300">
+                    Duration: {formatTime(video1.duration)}
+                  </div>
+                  <Button
+                    onClick={togglePlay1}
+                    size="sm"
+                    variant="outline"
+                    className="border-sage-200 hover:bg-sage-50 text-sage-400"
+                  >
+                    {isPlaying1 ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Video 2 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sage-400">{video2.filename}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <video
+                  id="video2"
+                  className="w-full rounded-lg"
+                  onTimeUpdate={handleVideo2TimeUpdate}
+                  onPlay={() => setIsPlaying2(true)}
+                  onPause={() => setIsPlaying2(false)}
+                  controls
+                >
+                  <source src={`/api/serve-video/${video2.video_id}`} type="video/mp4" />
+                  Your browser does not support the video tag.
+                </video>
+                
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-sage-300">
+                    Duration: {formatTime(video2.duration)}
+                  </div>
+                  <Button
+                    onClick={togglePlay2}
+                    size="sm"
+                    variant="outline"
+                    className="border-sage-200 hover:bg-sage-50 text-sage-400"
+                  >
+                    {isPlaying2 ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle>Comparison Settings</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Threshold: {threshold.toFixed(2)}
+                  <label className="block text-sm font-medium text-sage-400 mb-2">
+                    Similarity Threshold
                   </label>
                   <input
                     type="range"
-                    min="0.01"
-                    max="0.5"
+                    min="0"
+                    max="1"
                     step="0.01"
                     value={threshold}
                     onChange={(e) => setThreshold(parseFloat(e.target.value))}
-                    className="w-full accent-sage-500"
+                    className="w-full"
                   />
-                  <div className="flex justify-between text-xs text-sage-300 mt-1">
-                    <span>More sensitive</span>
-                    <span>Less sensitive</span>
+                  <div className="text-sm text-sage-300 mt-1">
+                    Current: {threshold.toFixed(2)} ({threshold < 0.3 ? 'Strict' : threshold < 0.7 ? 'Moderate' : 'Loose'})
                   </div>
                 </div>
-                <p className="text-sm text-sage-300">
-                  Lower values detect more subtle differences. Higher values only show major differences.
-                </p>
-                <div className="flex gap-2">
-                  <Button 
-                    onClick={handleThresholdChange}
-                    disabled={isLoading}
-                    className="flex-1 bg-sage-500 hover:bg-sage-600 text-white"
+                
+                <div>
+                  <label className="block text-sm font-medium text-sage-400 mb-2">
+                    Distance Metric
+                  </label>
+                  <select
+                    value={distanceMetric}
+                    onChange={(e) => setDistanceMetric(e.target.value as 'cosine' | 'euclidean')}
+                    className="w-full p-2 border border-sage-200 rounded-md bg-white text-sage-400"
                   >
-                    Apply
-                  </Button>
-                  <Button 
-                    onClick={() => setShowThresholdSettings(false)}
-                    variant="outline"
-                    className="flex-1 border-sage-200 hover:bg-sage-50"
-                  >
-                    Cancel
-                  </Button>
+                    <option value="cosine">Cosine Distance</option>
+                    <option value="euclidean">Euclidean Distance</option>
+                  </select>
                 </div>
               </div>
-            </Card>
-          </div>
+            </CardContent>
+          </Card>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Video Players - Larger */}
-          <div className="lg:col-span-3 space-y-4">
-            <div className="grid grid-cols-2 gap-6">
-              <div className="bg-white rounded-lg p-4 shadow-sm border border-sage-200">
-                <h3 className="text-sm font-medium mb-3 text-sage-300">{video1Data.filename}</h3>
-                <video
-                  ref={video1Ref}
-                  src={`${API_BASE_URL}/serve-video/${video1Data.video_id}`}
-                  className="w-full rounded shadow-sm"
-                  onTimeUpdate={handleTimeUpdate}
-                  controls={false}
-                />
-              </div>
-              <div className="bg-white rounded-lg p-4 shadow-sm border border-sage-200">
-                <h3 className="text-sm font-medium mb-3 text-sage-300">{video2Data.filename}</h3>
-                <video
-                  ref={video2Ref}
-                  src={`${API_BASE_URL}/serve-video/${video2Data.video_id}`}
-                  className="w-full rounded shadow-sm"
-                  controls={false}
-                />
-              </div>
-            </div>
+        {/* Comparison Results */}
+        {comparisonResult && (
+          <Card className="mt-8">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                Comparison Results
+                <Badge variant="secondary" className="bg-sage-100 text-sage-600">
+                  {comparisonResult.differing_segments} differences found
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-6">
+                {/* Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="text-center p-4 bg-sage-50 rounded-lg">
+                    <div className="text-2xl font-bold text-sage-500">{comparisonResult.total_segments}</div>
+                    <div className="text-sm text-sage-400">Total Segments</div>
+                  </div>
+                  <div className="text-center p-4 bg-sage-50 rounded-lg">
+                    <div className="text-2xl font-bold text-sage-500">{comparisonResult.differing_segments}</div>
+                    <div className="text-sm text-sage-400">Different Segments</div>
+                  </div>
+                  <div className="text-center p-4 bg-sage-50 rounded-lg">
+                    <div className="text-2xl font-bold text-sage-500">{comparisonResult.threshold_used}</div>
+                    <div className="text-sm text-sage-400">Threshold Used</div>
+                  </div>
+                </div>
 
-            {/* Video Controls */}
-            <div className="bg-white p-4 rounded-lg shadow-sm border border-sage-200">
-              <div className="flex items-center gap-4 mb-3">
-                <Button
-                  onClick={handlePlayPause}
-                  size="sm"
-                  className="bg-sage-500 hover:bg-sage-600 text-white"
-                >
-                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                </Button>
-                <span className="text-sm font-medium text-sage-400">
-                  {formatTime(currentTime)} / {formatTime(video1Data.duration)}
-                </span>
-              </div>
-
-              {/* Timeline with Markers */}
-              <div className="relative space-y-2">
-                {/* Difference visualization bar */}
-                <div className="relative h-8 bg-sage-50 rounded overflow-hidden">
-                  {differences.map((diff, index) => {
-                    const startPercent = (diff.start_sec / video1Data.duration) * 100;
-                    const widthPercent = ((diff.end_sec - diff.start_sec) / video1Data.duration) * 100;
-                    const isFullVideo = diff.start_sec === 0 && diff.end_sec >= video1Data.duration - 1;
-                    
-                    return (
+                {/* Timeline */}
+                <div>
+                  <h4 className="font-medium text-sage-400 mb-3">Timeline of Differences</h4>
+                  <div className="space-y-2">
+                    {comparisonResult.differences.map((diff, index) => (
                       <div
                         key={index}
-                        className={`absolute h-full ${getSeverityColor(diff.distance, isFullVideo)} opacity-70 hover:opacity-100 transition-opacity cursor-pointer`}
-                        style={{ 
-                          left: `${startPercent}%`,
-                          width: `${Math.max(1, widthPercent)}%`
-                        }}
-                        title={`${formatTime(diff.start_sec)} - ${formatTime(diff.end_sec)}: Distance ${diff.distance.toFixed(3)}`}
+                        className="flex items-center gap-4 p-3 bg-red-50 border border-red-200 rounded-lg cursor-pointer hover:bg-red-100 transition-colors"
                         onClick={() => seekToTime(diff.start_sec)}
-                      />
-                    );
-                  })}
-                  
-                  {/* Grid lines for time reference */}
-                  {Array.from({ length: 5 }, (_, i) => (
-                    <div
-                      key={i}
-                      className="absolute top-0 h-full w-px bg-sage-200 opacity-30"
-                      style={{ left: `${(i + 1) * 20}%` }}
-                    />
-                  ))}
-                </div>
-                
-                {/* Main playback track */}
-                <div className="relative h-3 bg-sage-100 rounded-full cursor-pointer group"
-                     onClick={(e) => {
-                       const rect = e.currentTarget.getBoundingClientRect();
-                       const percent = (e.clientX - rect.left) / rect.width;
-                       seekToTime(percent * video1Data.duration);
-                     }}>
-                  {/* Progress bar */}
-                  <div 
-                    className="absolute h-full bg-sage-500 rounded-full transition-all duration-100"
-                    style={{ width: `${(currentTime / video1Data.duration) * 100}%` }}
-                  />
-                  
-                  {/* Hover indicator */}
-                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="h-full bg-white/10 rounded-full" />
+                      >
+                        <div className="flex-1">
+                          <div className="font-medium text-red-700">
+                            {formatTime(diff.start_sec)} - {formatTime(diff.end_sec)}
+                          </div>
+                          <div className="text-sm text-red-600">
+                            Distance: {diff.distance.toFixed(4)}
+                          </div>
+                        </div>
+                        <Badge variant="destructive" className="bg-red-100 text-red-700">
+                          Different
+                        </Badge>
+                      </div>
+                    ))}
                   </div>
-                  
-                  {/* Current time indicator */}
-                  <div 
-                    className="absolute w-5 h-5 bg-white border-[3px] border-sage-500 rounded-full -translate-x-1/2 -translate-y-1/2 top-1/2 shadow-lg transition-all duration-100 z-10 hover:scale-110"
-                    style={{ left: `${(currentTime / video1Data.duration) * 100}%` }}
-                  />
-                </div>
-                
-                {/* Time labels */}
-                <div className="flex justify-between text-xs text-sage-300 select-none">
-                  <span>0:00</span>
-                  <span>{formatTime(video1Data.duration / 2)}</span>
-                  <span>{formatTime(video1Data.duration)}</span>
                 </div>
               </div>
-            </div>
-          </div>
-
-          {/* Differences List - Narrower */}
-          <div className="lg:col-span-1">
-            <Card className="p-4 bg-white border-sage-200 h-full">
-              <h2 className="text-lg font-semibold mb-4">
-                Detected Differences ({differences.length})
-              </h2>
-              
-              {isLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-sage-500"></div>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto mb-4">
-                    {differences.length === 0 ? (
-                      <p className="text-sage-300 text-center py-8">
-                        No significant differences found
-                      </p>
-                    ) : (
-                      differences.map((diff, index) => {
-                        const isFullVideo = diff.start_sec === 0 && diff.end_sec >= video1Data.duration - 1;
-                        
-                        return (
-                          <div
-                            key={index}
-                            className={`p-3 rounded-lg cursor-pointer transition-colors ${
-                              isFullVideo 
-                                ? 'bg-sage-100 hover:bg-sage-200 border border-sage-200' 
-                                : 'bg-sage-50 hover:bg-sage-200'
-                            }`}
-                            onClick={() => seekToTime(diff.start_sec)}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">
-                                {formatTime(diff.start_sec)} - {formatTime(diff.end_sec)}
-                              </span>
-                              <Badge className={`${getSeverityColor(diff.distance, isFullVideo)} text-white text-xs`}>
-                                {diff.distance === Infinity ? 'Missing' : diff.distance.toFixed(3)}
-                              </Badge>
-                            </div>
-                            {isFullVideo && (
-                              <div className="mt-1 text-xs text-sage-300">Overall comparison</div>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-
-                  {/* Summary */}
-                  <div className="pt-4 border-t border-sage-200">
-                    <div className="text-sm space-y-1">
-                      <p className="flex justify-between">
-                        <span className="text-sage-300">Total segments:</span>
-                        <span className="font-medium">{totalSegments}</span>
-                      </p>
-                      <p className="flex justify-between">
-                        <span className="text-sage-300">Different segments:</span>
-                        <span className="font-medium">
-                          {differences.filter(d => !(d.start_sec === 0 && d.end_sec >= (video1Data?.duration || 0) - 1)).length}
-                        </span>
-                      </p>
-                      <p className="flex justify-between">
-                        <span className="text-sage-300">Similarity:</span>
-                        <span className="font-medium text-green-600">{similarityPercent}%</span>
-                      </p>
-                      <p className="flex justify-between">
-                        <span className="text-sage-300">Threshold:</span>
-                        <span className="font-medium">{threshold.toFixed(2)}</span>
-                      </p>
-                    </div>
-                  </div>
-                </>
-              )}
-            </Card>
-          </div>
-        </div>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   );

@@ -6,11 +6,11 @@ export interface ApiKeyResponse {
 }
 
 export interface VideoUploadResponse {
-  embeddings: Record<string, unknown>;
+  message: string;
   filename: string;
-  duration: number;
-  embedding_id: string;
   video_id: string;
+  embedding_id: string;
+  status: string;
 }
 
 export interface Difference {
@@ -36,6 +36,24 @@ export interface HealthResponse {
   timestamp: string;
   database_status: string;
   python_version: string;
+}
+
+export interface VideoStatusResponse {
+  video_id: string;
+  filename: string;
+  status: string;
+  embedding_status: string;
+  duration?: number;
+  upload_timestamp: string;
+}
+
+export interface EmbeddingStatusResponse {
+  embedding_id: string;
+  filename: string;
+  status: string;
+  duration?: number;
+  completed_at?: string;
+  error?: string;
 }
 
 class ApiClient {
@@ -104,12 +122,21 @@ class ApiClient {
     return this.request<ComparisonResponse>(`/compare-local-videos?${params}`);
   }
 
+  async getVideoStatus(videoId: string): Promise<VideoStatusResponse> {
+    return this.request<VideoStatusResponse>(`/video-status/${videoId}`);
+  }
+
+  async getEmbeddingStatus(embeddingId: string): Promise<EmbeddingStatusResponse> {
+    return this.request<EmbeddingStatusResponse>(`/embedding-status/${embeddingId}`);
+  }
+
   async getHealth(): Promise<HealthResponse> {
     return this.request<HealthResponse>('/health');
   }
 
-  getVideoUrl(videoId: string): string {
-    return `${this.baseUrl}/serve-video/${videoId}`;
+  getVideoUrl(videoId: string): Promise<string> {
+    return this.request<{video_url: string}>(`/serve-video/${videoId}`)
+      .then(response => response.video_url);
   }
 }
 
