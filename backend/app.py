@@ -65,15 +65,28 @@ async def log_requests(request: Request, call_next):
 # Database setup
 DB_PATH = "sage.db"
 conn = sqlite3.connect(DB_PATH)
-conn.execute('''
-    CREATE TABLE IF NOT EXISTS api_keys (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        key_hash TEXT UNIQUE NOT NULL,
-        api_key TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-''')
-conn.commit()
+
+# Check if api_key column exists, if not add it
+try:
+    cursor = conn.execute("PRAGMA table_info(api_keys)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'api_key' not in columns:
+        conn.execute('ALTER TABLE api_keys ADD COLUMN api_key TEXT')
+        conn.commit()
+        logger.info("Added api_key column to existing api_keys table")
+except Exception as e:
+    logger.info("Creating new api_keys table")
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key_hash TEXT UNIQUE NOT NULL,
+            api_key TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+
 conn.close()
 
 # S3 Configuration

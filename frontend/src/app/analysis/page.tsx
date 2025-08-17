@@ -45,10 +45,6 @@ export default function AnalysisPage() {
   // Video player states
   const [isPlaying1, setIsPlaying1] = useState(false);
   const [isPlaying2, setIsPlaying2] = useState(false);
-  const [currentTime1, setCurrentTime1] = useState(0);
-  const [currentTime2, setCurrentTime2] = useState(0);
-  const [duration1, setDuration1] = useState(0);
-  const [duration2, setDuration2] = useState(0);
 
   useEffect(() => {
     // Load video data from session storage
@@ -90,18 +86,6 @@ export default function AnalysisPage() {
     }
   };
 
-  const handleVideo1TimeUpdate = (event: React.SyntheticEvent<HTMLVideoElement>) => {
-    const video = event.currentTarget;
-    setCurrentTime1(video.currentTime);
-    setDuration1(video.duration);
-  };
-
-  const handleVideo2TimeUpdate = (event: React.SyntheticEvent<HTMLVideoElement>) => {
-    const video = event.currentTarget;
-    setCurrentTime2(video.currentTime);
-    setDuration2(video.duration);
-  };
-
   const togglePlay1 = () => {
     const video = document.getElementById('video1') as HTMLVideoElement;
     if (video) {
@@ -132,14 +116,8 @@ export default function AnalysisPage() {
     const video1 = document.getElementById('video1') as HTMLVideoElement;
     const video2 = document.getElementById('video2') as HTMLVideoElement;
     
-    if (video1) {
-      video1.currentTime = time;
-      setCurrentTime1(time);
-    }
-    if (video2) {
-      video2.currentTime = time;
-      setCurrentTime2(time);
-    }
+    if (video1) video1.currentTime = time;
+    if (video2) video2.currentTime = time;
   };
 
   const formatTime = (seconds: number) => {
@@ -229,7 +207,6 @@ export default function AnalysisPage() {
                 <video
                   id="video1"
                   className="w-full rounded-lg"
-                  onTimeUpdate={handleVideo1TimeUpdate}
                   onPlay={() => setIsPlaying1(true)}
                   onPause={() => setIsPlaying1(false)}
                   controls
@@ -265,7 +242,6 @@ export default function AnalysisPage() {
                 <video
                   id="video2"
                   className="w-full rounded-lg"
-                  onTimeUpdate={handleVideo2TimeUpdate}
                   onPlay={() => setIsPlaying2(true)}
                   onPause={() => setIsPlaying2(false)}
                   controls
