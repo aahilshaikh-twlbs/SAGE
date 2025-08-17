@@ -34,6 +34,8 @@ export default function AnalysisPage() {
   const [threshold, setThreshold] = useState(0.05);
   const [showThresholdSettings, setShowThresholdSettings] = useState(false);
   const [totalSegments, setTotalSegments] = useState(0);
+  const [video1Url, setVideo1Url] = useState<string>('');
+  const [video2Url, setVideo2Url] = useState<string>('');
   const video1Ref = useRef<HTMLVideoElement>(null);
   const video2Ref = useRef<HTMLVideoElement>(null);
 
@@ -73,11 +75,47 @@ export default function AnalysisPage() {
         const video1 = JSON.parse(video1Str) as VideoData;
         const video2 = JSON.parse(video2Str) as VideoData;
         
-        setVideo1Data(video1);
-        setVideo2Data(video2);
-        
-        // Compare videos with default threshold
-        await loadComparison(video1, video2, threshold);
+        // Verify videos still exist on backend and get current status
+        try {
+          const video1Status = await api.getVideoStatus(video1.video_id);
+          const video2Status = await api.getVideoStatus(video2.video_id);
+          
+          // Update video data with current backend status
+          const updatedVideo1 = {
+            ...video1,
+            duration: video1Status.duration || video1.duration,
+            status: video1Status.status
+          };
+          
+          const updatedVideo2 = {
+            ...video2,
+            duration: video2Status.duration || video2.duration,
+            status: video2Status.status
+          };
+          
+          setVideo1Data(updatedVideo1);
+          setVideo2Data(updatedVideo2);
+          
+          // Get video URLs for playback
+          try {
+            const url1 = await api.getVideoUrl(updatedVideo1.video_id);
+            const url2 = await api.getVideoUrl(updatedVideo2.video_id);
+            setVideo1Url(url1);
+            setVideo2Url(url2);
+          } catch (urlError) {
+            console.error('Error getting video URLs:', urlError);
+            setError('Failed to load video URLs');
+          }
+          
+          // Compare videos with default threshold
+          await loadComparison(updatedVideo1, updatedVideo2, threshold);
+        } catch (statusError) {
+          console.error('Error getting video status:', statusError);
+          // Fall back to session storage data if status check fails
+          setVideo1Data(video1);
+          setVideo2Data(video2);
+          await loadComparison(video1, video2, threshold);
+        }
       } catch (err) {
         console.error('Error loading data:', err);
         setError('Failed to load comparison data');
@@ -248,23 +286,35 @@ export default function AnalysisPage() {
             <div className="grid grid-cols-2 gap-6">
               <div className="bg-white rounded-lg p-4 shadow-sm border border-[#D3D1CF]">
                 <h3 className="text-sm font-medium mb-3 text-[#9B9896]">{video1Data.filename}</h3>
-                <video
-                  ref={video1Ref}
-                  src={`/api/serve-video/${video1Data.video_id}`}
-                  className="w-full rounded shadow-sm"
-                  onTimeUpdate={handleTimeUpdate}
-                  controls={false}
-                />
+                {video1Url ? (
+                  <video
+                    ref={video1Ref}
+                    src={video1Url}
+                    className="w-full rounded shadow-sm"
+                    onTimeUpdate={handleTimeUpdate}
+                    controls={false}
+                  />
+                ) : (
+                  <div className="w-full h-48 bg-gray-100 rounded flex items-center justify-center">
+                    <div className="text-gray-500">Loading video...</div>
+                  </div>
+                )}
               </div>
               <div className="bg-white rounded-lg p-4 shadow-sm border border-[#D3D1CF]">
                 <h3 className="text-sm font-medium mb-3 text-[#9B9896]">{video2Data.filename}</h3>
-                <video
-                  ref={video2Ref}
-                  src={`/api/serve-video/${video2Data.video_id}`}
-                  className="w-full rounded shadow-sm"
-                  onTimeUpdate={handleTimeUpdate}
-                  controls={false}
-                />
+                {video2Url ? (
+                  <video
+                    ref={video2Ref}
+                    src={video2Url}
+                    className="w-full rounded shadow-sm"
+                    onTimeUpdate={handleTimeUpdate}
+                    controls={false}
+                  />
+                ) : (
+                  <div className="w-full h-48 bg-gray-100 rounded flex items-center justify-center">
+                    <div className="text-gray-500">Loading video...</div>
+                  </div>
+                )}
               </div>
             </div>
 
