@@ -110,16 +110,40 @@ class ApiClient {
     embeddingId1: string,
     embeddingId2: string,
     threshold: number = 0.1,
-    distanceMetric: string = 'cosine'
-  ): Promise<ComparisonResponse> {
+    distanceMetric: 'cosine' | 'euclidean' = 'cosine'
+  ): Promise<{
+    filename1: string;
+    filename2: string;
+    differences: Array<{
+      start_sec: number;
+      end_sec: number;
+      distance: number;
+    }>;
+    total_segments: number;
+    differing_segments: number;
+    threshold_used: number;
+  }> {
     const params = new URLSearchParams({
       embedding_id1: embeddingId1,
       embedding_id2: embeddingId2,
       threshold: threshold.toString(),
-      distance_metric: distanceMetric,
+      distance_metric: distanceMetric
     });
-
-    return this.request<ComparisonResponse>(`/compare-local-videos?${params}`);
+    
+    return this.request<{
+      filename1: string;
+      filename2: string;
+      differences: Array<{
+        start_sec: number;
+        end_sec: number;
+        distance: number;
+      }>;
+      total_segments: number;
+      differing_segments: number;
+      threshold_used: number;
+    }>(`/compare-local-videos?${params}`, {
+      method: 'POST',
+    });
   }
 
   async getVideoStatus(videoId: string): Promise<VideoStatusResponse> {
