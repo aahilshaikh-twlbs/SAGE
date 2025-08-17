@@ -87,6 +87,38 @@ except Exception as e:
     ''')
     conn.commit()
 
+# Create videos table for persistent storage
+conn.execute('''
+    CREATE TABLE IF NOT EXISTS videos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        video_id TEXT UNIQUE NOT NULL,
+        filename TEXT NOT NULL,
+        s3_url TEXT NOT NULL,
+        status TEXT NOT NULL,
+        embedding_id TEXT,
+        duration REAL,
+        upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+''')
+
+# Create embeddings table for persistent storage
+conn.execute('''
+    CREATE TABLE IF NOT EXISTS embeddings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        embedding_id TEXT UNIQUE NOT NULL,
+        filename TEXT NOT NULL,
+        status TEXT NOT NULL,
+        video_id TEXT NOT NULL,
+        s3_url TEXT NOT NULL,
+        duration REAL,
+        task_id TEXT,
+        completed_at TIMESTAMP,
+        error TEXT,
+        FOREIGN KEY (video_id) REFERENCES videos (video_id)
+    )
+''')
+
+conn.commit()
 conn.close()
 
 # S3 Configuration
@@ -162,6 +194,94 @@ video_storage: Dict[str, Dict[str, Any]] = {}
 current_api_key = None
 tl_client = None
 start_time = datetime.now()
+
+def load_storage_from_db():
+    """Load video and embedding data from database on startup."""
+    global video_storage, embedding_storage
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        
+        # Load videos
+        cursor = conn.execute('SELECT * FROM videos')
+        for row in cursor.fetchall():
+            video_storage[row[1]] = {
+                "filename": row[2],
+                "s3_url": row[3],
+                "status": row[4],
+                "embedding_id": row[5],
+                "duration": row[6],
+                "upload_timestamp": row[7]
+            }
+        
+        # Load embeddings
+        cursor = conn.execute('SELECT * FROM embeddings')
+        for row in cursor.fetchall():
+            embedding_storage[row[1]] = {
+                "filename": row[2],
+                "status": row[3],
+                "video_id": row[4],
+                "s3_url": row[5],
+                "duration": row[6],
+                "task_id": row[7],
+                "completed_at": row[8],
+                "error": row[9]
+            }
+        
+        conn.close()
+        logger.info(f"Loaded {len(video_storage)} videos and {len(embedding_storage)} embeddings from database")
+        
+    except Exception as e:
+        logger.error(f"Error loading storage from database: {e}")
+
+def save_video_to_db(video_id: str, video_data: Dict[str, Any]):
+    """Save video data to database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute('''
+            INSERT OR REPLACE INTO videos 
+            (video_id, filename, s3_url, status, embedding_id, duration, upload_timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            video_id,
+            video_data["filename"],
+            video_data["s3_url"],
+            video_data["status"],
+            video_data.get("embedding_id"),
+            video_data.get("duration"),
+            video_data["upload_timestamp"]
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error saving video to database: {e}")
+
+def save_embedding_to_db(embedding_id: str, embedding_data: Dict[str, Any]):
+    """Save embedding data to database."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute('''
+            INSERT OR REPLACE INTO embeddings 
+            (embedding_id, filename, status, video_id, s3_url, duration, task_id, completed_at, error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            embedding_id,
+            embedding_data["filename"],
+            embedding_data["status"],
+            embedding_data["video_id"],
+            embedding_data["s3_url"],
+            embedding_data.get("duration"),
+            embedding_data.get("task_id"),
+            embedding_data.get("completed_at"),
+            embedding_data.get("error")
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error saving embedding to database: {e}")
+
+# Load existing data on startup
+load_storage_from_db()
 
 # Pydantic models
 class ApiKeyRequest(BaseModel):
@@ -302,6 +422,10 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
             "s3_url": s3_url
         }
         
+        # Save video to DB
+        save_video_to_db(video_id, video_storage[video_id])
+        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
+
         # Start async embedding generation
         asyncio.create_task(generate_embeddings_async(embedding_id, s3_url, api_key))
         
@@ -372,12 +496,18 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
             video_storage[video_id]["duration"] = duration
             video_storage[video_id]["status"] = "ready"
         
+        # Save video and embedding to DB
+        save_video_to_db(video_id, video_storage[video_id])
+        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
+
         logger.info(f"Embedding generation completed for {embedding_id}")
         
     except Exception as e:
         logger.error(f"Error in async embedding generation for {embedding_id}: {e}")
         embedding_storage[embedding_id]["status"] = "failed"
         embedding_storage[embedding_id]["error"] = str(e)
+        # Save embedding to DB even on failure
+        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
 
 @app.post("/compare-local-videos", response_model=ComparisonResponse)
 async def compare_local_videos(
@@ -516,25 +646,36 @@ async def get_embedding_status(embedding_id: str):
 
 @app.get("/video-status/{video_id}")
 async def get_video_status(video_id: str):
-    """Get the status of a video including its embedding status."""
+    """Get video processing status."""
+    logger.info(f"Video status request for {video_id}")
+    logger.info(f"Available video IDs: {list(video_storage.keys())}")
+    
     if video_id not in video_storage:
+        logger.warning(f"Video {video_id} not found in storage")
         raise HTTPException(status_code=404, detail="Video not found")
     
     video_data = video_storage[video_id]
-    embedding_id = video_data["embedding_id"]
+    embedding_id = video_data.get("embedding_id")
     
-    embedding_status = "unknown"
-    if embedding_id in embedding_storage:
-        embedding_status = embedding_storage[embedding_id]["status"]
-    
-    return {
-        "video_id": video_id,
-        "filename": video_data["filename"],
-        "status": video_data["status"],
-        "embedding_status": embedding_status,
-        "duration": video_data.get("duration"),
-        "upload_timestamp": video_data["upload_timestamp"]
-    }
+    if embedding_id and embedding_id in embedding_storage:
+        embed_data = embedding_storage[embedding_id]
+        return {
+            "video_id": video_id,
+            "filename": video_data["filename"],
+            "status": video_data["status"],
+            "embedding_status": embed_data["status"],
+            "duration": video_data.get("duration"),
+            "upload_timestamp": video_data["upload_timestamp"]
+        }
+    else:
+        return {
+            "video_id": video_id,
+            "filename": video_data["filename"],
+            "status": video_data["status"],
+            "embedding_status": "unknown",
+            "duration": video_data.get("duration"),
+            "upload_timestamp": video_data["upload_timestamp"]
+        }
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
