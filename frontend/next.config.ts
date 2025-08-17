@@ -3,8 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   async rewrites() {
     // For Vercel deployment, use environment variable
-    // For local development, fallback to localhost
-    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    // For local development, fallback to production backend
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://209.38.142.207:8000';
     
     return [
       {
