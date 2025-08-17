@@ -44,6 +44,14 @@ export default function LandingPage() {
         }
       } catch (error) {
         console.error('Error checking stored API key:', error);
+        // If it's a connection error, show the API key config to let user retry
+        if (error instanceof Error && error.message.includes('Failed to fetch')) {
+          setError('Cannot connect to backend. Please check your connection and try again.');
+          setShowApiKeyConfig(true);
+        } else {
+          // For other errors, just show the API key config
+          setShowApiKeyConfig(true);
+        }
       } finally {
         setIsLoading(false);
       }
@@ -91,6 +99,7 @@ export default function LandingPage() {
   const handleKeyValidated = (key: string) => {
     localStorage.setItem('sage_api_key', key);
     setShowApiKeyConfig(false);
+    setError(null); // Clear any connection errors
   };
 
   const generateThumbnail = (file: File): Promise<string> => {
@@ -119,8 +128,21 @@ export default function LandingPage() {
     if (!files || files.length === 0) return;
     
     const file = files[0];
+    
+    // Check if we already have 2 videos
     if (uploadedVideos.length >= 2) {
       alert('Maximum 2 videos allowed');
+      return;
+    }
+    
+    // Check if this exact file is already uploaded
+    const isDuplicate = uploadedVideos.some(video => 
+      video.file.name === file.name && 
+      video.file.size === file.size
+    );
+    
+    if (isDuplicate) {
+      alert('This video is already uploaded');
       return;
     }
     
@@ -145,11 +167,24 @@ export default function LandingPage() {
       
     } catch (error) {
       console.error('Upload failed:', error);
+      let errorMessage = 'Upload failed';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('Failed to fetch')) {
+          errorMessage = 'Cannot connect to backend. Please check your connection.';
+        } else if (error.message.includes('Upload failed')) {
+          errorMessage = error.message;
+        }
+      }
+      
       setUploadedVideos(prev => prev.map(video => 
         video.id === newVideo.id 
-          ? { ...video, status: 'error', error: 'Upload failed' }
+          ? { ...video, status: 'error', error: errorMessage }
           : video
       ));
+      
+      // Also show error at the top level
+      setError(errorMessage);
     }
     
     // Reset file input
@@ -158,6 +193,8 @@ export default function LandingPage() {
 
   const removeVideo = (videoId: string) => {
     setUploadedVideos(prev => prev.filter(video => video.id !== videoId));
+    // Clear any error messages when removing videos
+    setError(null);
   };
 
   const startComparison = () => {
@@ -211,6 +248,13 @@ export default function LandingPage() {
                 <Video className="w-5 h-5 text-white" />
               </div>
               <h1 className="text-xl font-semibold text-sage-400">SAGE</h1>
+              {/* Connection Status */}
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${error && error.includes('Cannot connect') ? 'bg-red-500' : 'bg-green-500'}`}></div>
+                <span className="text-sm text-sage-300">
+                  {error && error.includes('Cannot connect') ? 'Backend Offline' : 'Backend Online'}
+                </span>
+              </div>
             </div>
             
             <Button

@@ -1,4 +1,8 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// API Configuration for Vercel deployment
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://your-backend-domain.com';
+
+// For local development, you can override this with:
+// NEXT_PUBLIC_API_URL=http://localhost:8000
 
 export interface ApiKeyResponse {
   key: string;
