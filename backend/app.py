@@ -211,11 +211,11 @@ def get_twelve_labs_client(api_key: str):
         tl_client = TwelveLabs(api_key=api_key)
         current_api_key = api_key
         
-        # Save API key hash
+        # Save API key hash and the actual key
         key_hash = hashlib.sha256(api_key.encode()).hexdigest()
         conn = sqlite3.connect(DB_PATH)
         conn.execute('INSERT OR REPLACE INTO api_keys (key_hash, api_key) VALUES (?, ?)', 
-                     (key_hash, None))
+                     (key_hash, api_key))
         conn.commit()
         conn.close()
         
@@ -234,11 +234,11 @@ async def validate_api_key(request: ApiKeyRequest):
         client = TwelveLabs(api_key=request.key)
         client.task.list()  # Test API call
         
-        # Save API key hash
+        # Save API key hash and the actual key
         key_hash = hashlib.sha256(request.key.encode()).hexdigest()
         conn = sqlite3.connect(DB_PATH)
         conn.execute('INSERT OR REPLACE INTO api_keys (key_hash, api_key) VALUES (?, ?)', 
-                     (key_hash, None))
+                     (key_hash, request.key))
         conn.commit()
         conn.close()
         
@@ -266,11 +266,16 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
         if not stored_key_hash:
             raise HTTPException(status_code=400, detail="No API key configured. Please configure your TwelveLabs API key first.")
         
-        # For now, we'll use a placeholder - in production this should come from proper auth
-        # You'll need to implement proper API key retrieval from the request
-        api_key = os.getenv('TWELVELABS_API_KEY', '')
-        if not api_key:
-            raise HTTPException(status_code=400, detail="Please set TWELVELABS_API_KEY environment variable")
+        # Get the actual API key from the database
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.execute('SELECT api_key FROM api_keys ORDER BY created_at DESC LIMIT 1')
+        stored_api_key = cursor.fetchone()
+        conn.close()
+        
+        if not stored_api_key or not stored_api_key[0]:
+            raise HTTPException(status_code=400, detail="No API key found. Please validate your API key first.")
+        
+        api_key = stored_api_key[0]
         
         # Upload to S3 first
         logger.info(f"Uploading file {file.filename} to S3...")
