@@ -198,6 +198,9 @@ export default function AnalysisPage() {
     ? ((1 - differences.length / totalSegments) * 100).toFixed(1)
     : '0';
 
+  // Use the longer video's duration for timeline
+  const maxDuration = Math.max(video1Data.duration, video2Data.duration);
+
   return (
     <div className="min-h-screen bg-[#F4F3F3] text-[#1D1C1B]">
       {/* Header */}

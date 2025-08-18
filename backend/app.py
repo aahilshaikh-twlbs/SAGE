@@ -1,17 +1,15 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Depends, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import logging
 import sqlite3
 from twelvelabs import TwelveLabs
 from twelvelabs.models.embed import EmbeddingsTask
 import hashlib
 import numpy as np
-import tempfile
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import sys
 import boto3
 from botocore.exceptions import ClientError
@@ -39,267 +37,6 @@ logger = logging.getLogger(__name__)
 # Set the formatter for the root logger
 for handler in logging.root.handlers:
     handler.setFormatter(PSTFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-
-app = FastAPI(title="SAGE Backend", version="2.0.0")
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://tl-sage.vercel.app"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = datetime.now()
-    client_host = request.client.host if request.client else "unknown"
-    path = str(request.url.path)
-    
-    try:
-        response = await call_next(request)
-        duration = (datetime.now() - start_time).total_seconds()
-        
-        if response.status_code >= 400:
-            logger.warning(f"{client_host} - {request.method} {path} - {response.status_code} ({duration:.3f}s)")
-        else:
-            logger.info(f"{client_host} - {request.method} {path} - {response.status_code} ({duration:.3f}s)")
-        
-        return response
-    except Exception as e:
-        duration = (datetime.now() - start_time).total_seconds()
-        logger.error(f"{client_host} - {request.method} {path} - Error: {str(e)} ({duration:.3f}s)")
-        raise
-
-# Database setup
-DB_PATH = "sage.db"
-conn = sqlite3.connect(DB_PATH)
-
-# Check if api_key column exists, if not add it
-try:
-    cursor = conn.execute("PRAGMA table_info(api_keys)")
-    columns = [column[1] for column in cursor.fetchall()]
-    
-    if 'api_key' not in columns:
-        conn.execute('ALTER TABLE api_keys ADD COLUMN api_key TEXT')
-        conn.commit()
-        logger.info("Added api_key column to existing api_keys table")
-except Exception as e:
-    logger.info("Creating new api_keys table")
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS api_keys (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            key_hash TEXT UNIQUE NOT NULL,
-            api_key TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-
-# Create videos table for persistent storage
-conn.execute('''
-    CREATE TABLE IF NOT EXISTS videos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        video_id TEXT UNIQUE NOT NULL,
-        filename TEXT NOT NULL,
-        s3_url TEXT NOT NULL,
-        status TEXT NOT NULL,
-        embedding_id TEXT,
-        duration REAL,
-        upload_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-''')
-
-# Create embeddings table for persistent storage
-conn.execute('''
-    CREATE TABLE IF NOT EXISTS embeddings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        embedding_id TEXT UNIQUE NOT NULL,
-        filename TEXT NOT NULL,
-        status TEXT NOT NULL,
-        video_id TEXT NOT NULL,
-        s3_url TEXT NOT NULL,
-        duration REAL,
-        task_id TEXT,
-        completed_at TIMESTAMP,
-        error TEXT,
-        FOREIGN KEY (video_id) REFERENCES videos (video_id)
-    )
-''')
-
-conn.commit()
-conn.close()
-
-# S3 Configuration
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "tl-sage-bucket")
-S3_REGION = os.getenv("S3_REGION", "us-east-2")
-S3_PROFILE = os.getenv("S3_PROFILE", "dev")
-
-# Initialize S3 client using AWS profile
-s3_client = None
-try:
-    session = boto3.Session(profile_name=S3_PROFILE, region_name=S3_REGION)
-    s3_client = session.client('s3')
-    s3_client.list_buckets()
-    logger.info(f"S3 client initialized using profile '{S3_PROFILE}' for bucket: {S3_BUCKET_NAME}")
-except Exception as e:
-    logger.warning(f"S3 client initialization failed: {e}")
-    logger.warning("S3 functionality will be disabled. Make sure AWS SSO is configured and you're logged in.")
-    s3_client = None
-
-# Storage for videos and embeddings
-embedding_storage: Dict[str, Any] = {}
-video_storage: Dict[str, Dict[str, Any]] = {}
-current_api_key = None
-tl_client = None
-start_time = datetime.now()
-
-# Track active embedding tasks for cancellation
-active_tasks: Dict[str, Any] = {}
-
-def upload_to_s3(file_content: bytes, filename: str, content_type: str = "video/mp4") -> str:
-    """Upload a file to S3 and return the S3 URL."""
-    if not s3_client:
-        raise Exception("S3 client not initialized")
-    
-    file_key = f"videos/{uuid.uuid4()}_{filename}"
-    
-    try:
-        logger.info(f"Starting S3 upload for {filename} (size: {len(file_content)} bytes)")
-        s3_client.put_object(
-            Bucket=S3_BUCKET_NAME,
-            Key=file_key,
-            Body=file_content,
-            ContentType=content_type,
-            Metadata={
-                'original_filename': filename,
-                'upload_timestamp': datetime.now().isoformat()
-            }
-        )
-        
-        s3_url = f"s3://{S3_BUCKET_NAME}/{file_key}"
-        logger.info(f"File uploaded to S3: {s3_url}")
-        return s3_url
-        
-    except ClientError as e:
-        logger.error(f"Failed to upload file to S3: {e}")
-        raise Exception(f"S3 upload failed: {str(e)}")
-
-def get_s3_presigned_url(s3_url: str, expiration: int = 3600) -> str:
-    """Generate a presigned URL for an S3 object."""
-    if not s3_client:
-        raise Exception("S3 client not initialized")
-    
-    if s3_url.startswith("s3://"):
-        parts = s3_url[5:].split("/", 1)
-        bucket = parts[0]
-        key = parts[1] if len(parts) > 1 else ""
-    else:
-        raise Exception("Invalid S3 URL format")
-    
-    try:
-        presigned_url = s3_client.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': bucket, 'Key': key},
-            ExpiresIn=expiration
-        )
-        return presigned_url
-    except ClientError as e:
-        logger.error(f"Failed to generate presigned URL: {e}")
-        raise Exception(f"Presigned URL generation failed: {str(e)}")
-
-def load_storage_from_db():
-    """Load video and embedding data from database on startup."""
-    global video_storage, embedding_storage
-    
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        
-        # Load videos
-        cursor = conn.execute('SELECT * FROM videos')
-        for row in cursor.fetchall():
-            video_storage[row[1]] = {
-                "filename": row[2],
-                "s3_url": row[3],
-                "status": row[4],
-                "embedding_id": row[5],
-                "duration": row[6],
-                "upload_timestamp": row[7]
-            }
-        
-        # Load embeddings
-        cursor = conn.execute('SELECT * FROM embeddings')
-        for row in cursor.fetchall():
-            embedding_storage[row[1]] = {
-                "filename": row[2],
-                "status": row[3],
-                "video_id": row[4],
-                "s3_url": row[5],
-                "duration": row[6],
-                "task_id": row[7],
-                "completed_at": row[8],
-                "error": row[9]
-            }
-        
-        conn.close()
-        logger.info(f"Loaded {len(video_storage)} videos and {len(embedding_storage)} embeddings from database")
-        
-    except Exception as e:
-        logger.error(f"Error loading storage from database: {e}")
-
-def save_video_to_db(video_id: str, video_data: Dict[str, Any]):
-    """Save video data to database."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute('''
-            INSERT OR REPLACE INTO videos 
-            (video_id, filename, s3_url, status, embedding_id, duration, upload_timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            video_id,
-            video_data["filename"],
-            video_data["s3_url"],
-            video_data["status"],
-            video_data.get("embedding_id"),
-            video_data.get("duration"),
-            video_data["upload_timestamp"]
-        ))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Error saving video to database: {e}")
-
-def save_embedding_to_db(embedding_id: str, embedding_data: Dict[str, Any]):
-    """Save embedding data to database."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute('''
-            INSERT OR REPLACE INTO embeddings 
-            (embedding_id, filename, status, video_id, s3_url, duration, task_id, completed_at, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            embedding_id,
-            embedding_data["filename"],
-            embedding_data["status"],
-            embedding_data["video_id"],
-            embedding_data["s3_url"],
-            embedding_data.get("duration"),
-            embedding_data.get("task_id"),
-            embedding_data.get("completed_at"),
-            embedding_data.get("error")
-        ))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Error saving embedding to database: {e}")
-
-# Load existing data on startup
-load_storage_from_db()
 
 # Pydantic models
 class ApiKeyRequest(BaseModel):
@@ -341,128 +78,122 @@ class HealthResponse(BaseModel):
 class CancelTaskRequest(BaseModel):
     embedding_id: str
 
-def get_twelve_labs_client(api_key: str):
-    """Get or create TwelveLabs client."""
-    global tl_client, current_api_key
-    
-    if tl_client and current_api_key == api_key:
-        return tl_client
+# FastAPI app
+app = FastAPI(title="SAGE Backend", version="2.0.0")
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://tl-sage.vercel.app"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = datetime.now()
+    client_host = request.client.host if request.client else "unknown"
+    path = str(request.url.path)
     
     try:
-        tl_client = TwelveLabs(api_key=api_key)
-        current_api_key = api_key
+        response = await call_next(request)
+        duration = (datetime.now() - start_time).total_seconds()
         
-        # Save API key hash and the actual key
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute('INSERT OR REPLACE INTO api_keys (key_hash, api_key) VALUES (?, ?)', 
-                     (key_hash, api_key))
-        conn.commit()
-        conn.close()
+        if response.status_code >= 400:
+            logger.warning(f"{client_host} - {request.method} {path} - {response.status_code} ({duration:.3f}s)")
+        else:
+            logger.info(f"{client_host} - {request.method} {path} - {response.status_code} ({duration:.3f}s)")
         
-        logger.info("Successfully initialized TwelveLabs client")
-        return tl_client
+        return response
     except Exception as e:
-        logger.error(f"Error initializing TwelveLabs client: {e}")
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        duration = (datetime.now() - start_time).total_seconds()
+        logger.error(f"{client_host} - {request.method} {path} - Error: {str(e)} ({duration:.3f}s)")
+        raise
 
-@app.post("/validate-key", response_model=ApiKeyResponse)
-async def validate_api_key(request: ApiKeyRequest):
-    """Validate TwelveLabs API key and store hash securely."""
-    logger.info("Validating API key...")
+# Database setup
+DB_PATH = "sage.db"
+
+def init_database():
+    """Initialize the database with API keys table."""
+    conn = sqlite3.connect(DB_PATH)
     try:
-        # Test the API key
-        client = TwelveLabs(api_key=request.key)
-        client.task.list()  # Test API call
+        cursor = conn.execute("PRAGMA table_info(api_keys)")
+        columns = [column[1] for column in cursor.fetchall()]
         
-        # Save API key hash and the actual key
-        key_hash = hashlib.sha256(request.key.encode()).hexdigest()
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute('INSERT OR REPLACE INTO api_keys (key_hash, api_key) VALUES (?, ?)', 
-                     (key_hash, request.key))
+        if 'api_key' not in columns:
+            conn.execute('ALTER TABLE api_keys ADD COLUMN api_key TEXT')
+            conn.commit()
+            logger.info("Added api_key column to existing api_keys table")
+    except Exception:
+        logger.info("Creating new api_keys table")
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key_hash TEXT UNIQUE NOT NULL,
+                api_key TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         conn.commit()
+    finally:
         conn.close()
-        
-        logger.info("API key validation successful")
-        return ApiKeyResponse(key=request.key, isValid=True)
-    except Exception as e:
-        logger.error(f"API key validation failed: {e}")
-        return ApiKeyResponse(key=request.key, isValid=False)
 
-@app.post("/upload-and-generate-embeddings", response_model=VideoUploadResponse)
-async def upload_and_generate_embeddings(file: UploadFile = File(...)):
-    """Upload video file and start AI embedding generation."""
-    if not file.content_type or not file.content_type.startswith('video/'):
-        raise HTTPException(status_code=400, detail="File must be a video")
+# Initialize database
+init_database()
+
+# S3 Configuration
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "tl-sage-bucket")
+S3_REGION = os.getenv("S3_REGION", "us-east-2")
+S3_PROFILE = os.getenv("S3_PROFILE", "dev")
+
+# Initialize S3 client
+s3_client = None
+try:
+    session = boto3.Session(profile_name=S3_PROFILE, region_name=S3_REGION)
+    s3_client = session.client('s3')
+    s3_client.list_buckets()
+    logger.info(f"S3 client initialized using profile '{S3_PROFILE}' for bucket: {S3_BUCKET_NAME}")
+except Exception as e:
+    logger.warning(f"S3 client initialization failed: {e}")
+    logger.warning("S3 functionality will be disabled. Make sure AWS SSO is configured and you're logged in.")
+    s3_client = None
+
+# Global state
+embedding_storage: Dict[str, Any] = {}
+video_storage: Dict[str, Dict[str, Any]] = {}
+current_api_key = None
+tl_client = None
+start_time = datetime.now()
+active_tasks: Dict[str, Any] = {}
+
+# Utility functions
+def get_s3_presigned_url(s3_url: str, expiration: int = 3600) -> str:
+    """Generate a presigned URL for an S3 object."""
+    if not s3_client:
+        raise Exception("S3 client not initialized")
+    
+    if s3_url.startswith("s3://"):
+        parts = s3_url[5:].split("/", 1)
+        bucket = parts[0]
+        key = parts[1] if len(parts) > 1 else ""
+    else:
+        raise Exception("Invalid S3 URL format")
     
     try:
-        logger.info(f"Starting upload for {file.filename}")
-        
-        # Get stored API key from database
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.execute('SELECT key_hash FROM api_keys ORDER BY created_at DESC LIMIT 1')
-        stored_key_hash = cursor.fetchone()
-        conn.close()
-        
-        if not stored_key_hash:
-            raise HTTPException(status_code=400, detail="No API key configured. Please configure your TwelveLabs API key first.")
-        
-        # Get the actual API key from the database
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.execute('SELECT api_key FROM api_keys ORDER BY created_at DESC LIMIT 1')
-        stored_api_key = cursor.fetchone()
-        conn.close()
-        
-        if not stored_api_key or not stored_api_key[0]:
-            raise HTTPException(status_code=400, detail="No API key found. Please validate your API key first.")
-        
-        api_key = stored_api_key[0]
-        
-        # Upload to S3 using streaming to avoid memory issues
-        logger.info(f"Uploading file {file.filename} to S3 using streaming...")
-        s3_url = await upload_to_s3_streaming(file)
-        
-        # Generate unique IDs
-        video_id = f"video_{uuid.uuid4()}"
-        embedding_id = f"embed_{uuid.uuid4()}"
-        
-        # Store video metadata immediately
-        video_storage[video_id] = {
-            "filename": file.filename,
-            "s3_url": s3_url,
-            "status": "uploaded",
-            "upload_timestamp": datetime.now().isoformat(),
-            "embedding_id": embedding_id
-        }
-        
-        # Initialize embedding storage
-        embedding_storage[embedding_id] = {
-            "filename": file.filename,
-            "status": "pending",
-            "video_id": video_id,
-            "s3_url": s3_url
-        }
-        
-        # Save video to DB
-        save_video_to_db(video_id, video_storage[video_id])
-        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
-
-        # Start async embedding generation
-        asyncio.create_task(generate_embeddings_async(embedding_id, s3_url, api_key))
-        
-        logger.info(f"File {file.filename} uploaded to S3 and embedding generation started")
-        
-        return VideoUploadResponse(
-            message="Video uploaded successfully. Embedding generation in progress.",
-            filename=file.filename,
-            video_id=video_id,
-            embedding_id=embedding_id,
-            status="processing"
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket, 'Key': key},
+            ExpiresIn=expiration
         )
-        
-    except Exception as e:
-        logger.error(f"Error uploading file {file.filename}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+        return presigned_url
+    except ClientError as e:
+        logger.error(f"Failed to generate presigned URL: {e}")
+        raise Exception(f"Presigned URL generation failed: {str(e)}")
 
 async def upload_to_s3_streaming(file: UploadFile) -> str:
     """Upload a file to S3 using streaming to avoid memory issues."""
@@ -541,6 +272,44 @@ async def upload_to_s3_streaming(file: UploadFile) -> str:
         logger.error(f"Failed to upload file to S3: {e}")
         raise Exception(f"S3 upload failed: {str(e)}")
 
+def get_twelve_labs_client(api_key: str):
+    """Get or create TwelveLabs client."""
+    global tl_client, current_api_key
+    
+    if tl_client and current_api_key == api_key:
+        return tl_client
+    
+    try:
+        tl_client = TwelveLabs(api_key=api_key)
+        current_api_key = api_key
+        
+        # Save API key hash and the actual key
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute('INSERT OR REPLACE INTO api_keys (key_hash, api_key) VALUES (?, ?)', 
+                     (key_hash, api_key))
+        conn.commit()
+        conn.close()
+        
+        logger.info("Successfully initialized TwelveLabs client")
+        return tl_client
+    except Exception as e:
+        logger.error(f"Error initializing TwelveLabs client: {e}")
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+def get_stored_api_key() -> str:
+    """Get the stored API key from database."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute('SELECT api_key FROM api_keys ORDER BY created_at DESC LIMIT 1')
+    stored_api_key = cursor.fetchone()
+    conn.close()
+    
+    if not stored_api_key or not stored_api_key[0]:
+        raise HTTPException(status_code=400, detail="No API key found. Please validate your API key first.")
+    
+    return stored_api_key[0]
+
+# Async functions
 async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str):
     """Asynchronously generate embeddings for a video from S3."""
     try:
@@ -548,7 +317,6 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         
         # Update status
         embedding_storage[embedding_id]["status"] = "processing"
-        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
         
         # Get TwelveLabs client
         tl = get_twelve_labs_client(api_key)
@@ -604,10 +372,6 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
             video_storage[video_id]["duration"] = duration
             video_storage[video_id]["status"] = "ready"
         
-        # Save video and embedding to DB
-        save_video_to_db(video_id, video_storage[video_id])
-        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
-
         logger.info(f"Embedding generation completed for {embedding_id}")
         
     except Exception as e:
@@ -618,9 +382,101 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         # Remove from active tasks
         if embedding_id in active_tasks:
             del active_tasks[embedding_id]
+
+# API endpoints
+@app.post("/validate-key", response_model=ApiKeyResponse)
+async def validate_api_key(request: ApiKeyRequest):
+    """Validate TwelveLabs API key and store hash securely."""
+    logger.info("Validating API key...")
+    try:
+        # Test the API key
+        client = TwelveLabs(api_key=request.key)
+        client.task.list()  # Test API call
         
-        # Save embedding to DB even on failure
-        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
+        # Save API key hash and the actual key
+        key_hash = hashlib.sha256(request.key.encode()).hexdigest()
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute('INSERT OR REPLACE INTO api_keys (key_hash, api_key) VALUES (?, ?)', 
+                     (key_hash, request.key))
+        conn.commit()
+        conn.close()
+        
+        logger.info("API key validation successful")
+        return ApiKeyResponse(key=request.key, isValid=True)
+    except Exception as e:
+        logger.error(f"API key validation failed: {e}")
+        return ApiKeyResponse(key=request.key, isValid=False)
+
+@app.post("/upload-and-generate-embeddings", response_model=VideoUploadResponse)
+async def upload_and_generate_embeddings(file: UploadFile = File(...)):
+    """Upload video file and start AI embedding generation."""
+    logger.info(f"=== UPLOAD REQUEST RECEIVED ===")
+    logger.info(f"File: {file.filename}")
+    logger.info(f"Content-Type: {file.content_type}")
+    logger.info(f"File size: {file.size if hasattr(file, 'size') else 'Unknown'}")
+    
+    if not file.content_type or not file.content_type.startswith('video/'):
+        logger.error(f"Invalid content type: {file.content_type}")
+        raise HTTPException(status_code=400, detail="File must be a video")
+    
+    try:
+        logger.info(f"Starting upload for {file.filename}")
+        
+        # Get stored API key
+        api_key = get_stored_api_key()
+        logger.info("API key retrieved successfully")
+        
+        # Upload to S3 using streaming
+        logger.info(f"Starting S3 upload for {file.filename}...")
+        s3_url = await upload_to_s3_streaming(file)
+        logger.info(f"S3 upload completed: {s3_url}")
+        
+        # Generate unique IDs
+        video_id = f"video_{uuid.uuid4()}"
+        embedding_id = f"embed_{uuid.uuid4()}"
+        logger.info(f"Generated IDs - Video: {video_id}, Embedding: {embedding_id}")
+        
+        # Store video metadata (in-memory only)
+        video_storage[video_id] = {
+            "filename": file.filename,
+            "s3_url": s3_url,
+            "status": "uploaded",
+            "upload_timestamp": datetime.now().isoformat(),
+            "embedding_id": embedding_id
+        }
+        
+        # Initialize embedding storage (in-memory only)
+        embedding_storage[embedding_id] = {
+            "filename": file.filename,
+            "status": "pending",
+            "video_id": video_id,
+            "s3_url": s3_url
+        }
+        
+        logger.info("Video and embedding data stored in memory")
+
+        # Start async embedding generation
+        logger.info("Starting async embedding generation...")
+        asyncio.create_task(generate_embeddings_async(embedding_id, s3_url, api_key))
+        
+        logger.info(f"=== UPLOAD COMPLETED SUCCESSFULLY ===")
+        logger.info(f"File {file.filename} uploaded to S3 and embedding generation started")
+        
+        return VideoUploadResponse(
+            message="Video uploaded successfully. Embedding generation in progress.",
+            filename=file.filename,
+            video_id=video_id,
+            embedding_id=embedding_id,
+            status="processing"
+        )
+        
+    except Exception as e:
+        logger.error(f"=== UPLOAD FAILED ===")
+        logger.error(f"Error uploading file {file.filename}: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
 
 @app.post("/cancel-embedding-task")
 async def cancel_embedding_task(request: CancelTaskRequest):
@@ -637,7 +493,6 @@ async def cancel_embedding_task(request: CancelTaskRequest):
         # Update status to cancelled
         embedding_storage[embedding_id]["status"] = "cancelled"
         embedding_storage[embedding_id]["error"] = "Task cancelled by user"
-        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
         
         # Remove from active tasks
         del active_tasks[embedding_id]
@@ -690,62 +545,88 @@ async def compare_local_videos(
         
         logger.info(f"Comparing {len(segments1)} segments from video1 with {len(segments2)} segments from video2, threshold: {threshold}")
         
-        # Compare segments
-        def keyfunc(s):
-            return round(s["start_offset_sec"], 2)
+        # Get video durations for proper timeline handling
+        duration1 = embed_data1.get("duration", 0)
+        duration2 = embed_data2.get("duration", 0)
+        max_duration = max(duration1, duration2)
         
-        dict_v1 = {keyfunc(seg): seg for seg in segments1}
-        dict_v2 = {keyfunc(seg): seg for seg in segments2}
+        logger.info(f"Video durations - Video1: {duration1}s, Video2: {duration2}s, Max: {max_duration}s")
         
-        all_keys = set(dict_v1.keys()).union(set(dict_v2.keys()))
+        # Compare segments using a more flexible matching approach
         differing_segments = []
         all_distances = []
+        matched_segments = 0
         
-        for k in sorted(all_keys):
-            seg1 = dict_v1.get(k)
-            seg2 = dict_v2.get(k)
+        # Create time-based mapping for segments
+        def get_segment_at_time(segments, time_sec):
+            """Find the segment that contains the given time."""
+            for seg in segments:
+                if seg["start_offset_sec"] <= time_sec <= seg["end_offset_sec"]:
+                    return seg
+            return None
+        
+        # Compare segments at regular intervals
+        interval = 2.0  # 2-second intervals for comparison
+        total_intervals = int(max_duration / interval) + 1
+        
+        for i in range(total_intervals):
+            time_sec = i * interval
             
-            if not seg1 or not seg2:
-                valid_seg = seg1 if seg1 else seg2
+            seg1 = get_segment_at_time(segments1, time_sec)
+            seg2 = get_segment_at_time(segments2, time_sec)
+            
+            if seg1 and seg2:
+                # Both videos have segments at this time - compare them
+                v1 = np.array(seg1["embedding"], dtype=np.float32)
+                v2 = np.array(seg2["embedding"], dtype=np.float32)
+                
+                if distance_metric == "cosine":
+                    # Cosine distance
+                    dot = np.dot(v1, v2)
+                    norm1 = np.linalg.norm(v1)
+                    norm2 = np.linalg.norm(v2)
+                    dist = 1.0 - (dot / (norm1 * norm2)) if norm1 > 0 and norm2 > 0 else 1.0
+                else:
+                    # Euclidean distance
+                    dist = float(np.linalg.norm(v1 - v2))
+                
+                all_distances.append(float(dist))
+                matched_segments += 1
+                
+                if float(dist) > threshold:
+                    differing_segments.append(DifferenceSegment(
+                        start_sec=time_sec,
+                        end_sec=min(time_sec + interval, max_duration),
+                        distance=float(dist)
+                    ))
+            
+            elif seg1 or seg2:
+                # One video has a segment but the other doesn't - mark as difference
                 differing_segments.append(DifferenceSegment(
-                    start_sec=valid_seg["start_offset_sec"],
-                    end_sec=valid_seg["end_offset_sec"],
+                    start_sec=time_sec,
+                    end_sec=min(time_sec + interval, max_duration),
                     distance=float('inf')
                 ))
-                continue
-            
-            v1 = np.array(seg1["embedding"], dtype=np.float32)
-            v2 = np.array(seg2["embedding"], dtype=np.float32)
-            
-            if distance_metric == "cosine":
-                # Cosine distance
-                dot = np.dot(v1, v2)
-                norm1 = np.linalg.norm(v1)
-                norm2 = np.linalg.norm(v2)
-                dist = 1.0 - (dot / (norm1 * norm2)) if norm1 > 0 and norm2 > 0 else 1.0
-            else:
-                # Euclidean distance
-                dist = float(np.linalg.norm(v1 - v2))
-            
-            all_distances.append(float(dist))
-            
-            if float(dist) > threshold:
-                differing_segments.append(DifferenceSegment(
-                    start_sec=seg1["start_offset_sec"],
-                    end_sec=seg1["end_offset_sec"],
-                    distance=float(dist)
-                ))
+        
+        # Calculate similarity percentage
+        if matched_segments > 0:
+            avg_distance = np.mean(all_distances) if all_distances else 0
+            similarity_percent = max(0, 100 - (avg_distance * 100))
+        else:
+            similarity_percent = 0
         
         if all_distances:
             logger.info(f"Distance stats - Min: {min(all_distances):.4f}, Max: {max(all_distances):.4f}, Mean: {np.mean(all_distances):.4f}")
+            logger.info(f"Similarity: {similarity_percent:.1f}%")
         
         logger.info(f"Found {len(differing_segments)} differences with threshold {threshold}")
+        logger.info(f"Matched segments: {matched_segments}, Total intervals: {total_intervals}")
         
         return ComparisonResponse(
             filename1=embed_data1["filename"],
             filename2=embed_data2["filename"],
             differences=differing_segments,
-            total_segments=max(len(segments1), len(segments2)),
+            total_segments=total_intervals,
             differing_segments=len(differing_segments),
             threshold_used=threshold
         )
@@ -829,7 +710,7 @@ async def health_check():
     seconds = int(uptime_seconds % 60)
     uptime_str = f"{hours}:{minutes:02d}:{seconds:02d}"
     
-    # Check database status
+    # Check database status (only for API keys)
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.execute("SELECT 1")
@@ -856,45 +737,14 @@ async def root():
         "docs": "/docs"
     }
 
-@app.delete("/cleanup-old-videos")
-async def cleanup_old_videos(days_old: int = Query(7, description="Delete videos older than this many days")):
-    """Clean up old videos and embeddings from the database."""
-    try:
-        cutoff_date = datetime.now() - timedelta(days=days_old)
-        cutoff_str = cutoff_date.isoformat()
-        
-        conn = sqlite3.connect(DB_PATH)
-        
-        # Get videos to delete
-        cursor = conn.execute(
-            'SELECT video_id, embedding_id FROM videos WHERE upload_timestamp < ?',
-            (cutoff_str,)
-        )
-        videos_to_delete = cursor.fetchall()
-        
-        deleted_count = 0
-        for video_id, embedding_id in videos_to_delete:
-            # Remove from memory storage
-            if video_id in video_storage:
-                del video_storage[video_id]
-            if embedding_id in embedding_storage:
-                del embedding_storage[embedding_id]
-            
-            # Remove from database
-            conn.execute('DELETE FROM videos WHERE video_id = ?', (video_id,))
-            conn.execute('DELETE FROM embeddings WHERE embedding_id = ?', (embedding_id,))
-            deleted_count += 1
-        
-        conn.commit()
-        conn.close()
-        
-        logger.info(f"Cleaned up {deleted_count} videos older than {days_old} days")
-        return {"message": f"Cleaned up {deleted_count} videos", "deleted_count": deleted_count}
-        
-    except Exception as e:
-        logger.error(f"Error cleaning up old videos: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to cleanup videos: {str(e)}")
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000,
+        timeout_keep_alive=300,  # 5 minutes keep-alive
+        timeout_graceful_shutdown=300,  # 5 minutes graceful shutdown
+        limit_concurrency=10,  # Limit concurrent connections
+        limit_max_requests=1000  # Restart worker after 1000 requests
+    )
