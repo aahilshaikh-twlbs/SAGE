@@ -332,7 +332,7 @@ export default function AnalysisPage() {
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </Button>
                 <span className="text-sm font-medium text-[#1D1C1B]">
-                  {formatTime(currentTime)} / {formatTime(video1Data.duration)}
+                  {formatTime(currentTime)} / {formatTime(maxDuration)}
                 </span>
               </div>
 
