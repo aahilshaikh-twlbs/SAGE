@@ -6,7 +6,7 @@ import { ApiKeyConfig } from '@/components/ApiKeyConfig';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { api } from '@/lib/api';
-import { Video, Loader2, X, Play, Upload, CheckCircle, AlertCircle } from 'lucide-react';
+import { Video, Loader2, X, Play, Upload, CheckCircle, AlertCircle, StopCircle } from 'lucide-react';
 
 interface LocalVideo {
   id: string;
@@ -14,9 +14,10 @@ interface LocalVideo {
   thumbnail: string;
   video_id?: string;
   embedding_id?: string;
-  status: 'uploading' | 'processing' | 'ready' | 'error';
+  status: 'uploading' | 'processing' | 'ready' | 'error' | 'cancelled';
   error?: string;
   duration?: number;
+  progress?: string;
 }
 
 export default function LandingPage() {
@@ -70,13 +71,36 @@ export default function LandingPage() {
 
       for (let i = 0; i < updatedVideos.length; i++) {
         const video = updatedVideos[i];
-        if (video.video_id && video.status === 'processing') {
+        if (video.video_id && (video.status === 'processing' || video.status === 'uploading')) {
           try {
             const status = await api.getVideoStatus(video.video_id);
-            if (status.status !== video.status || status.duration !== video.duration) {
+            
+            // Determine the current stage based on status
+            let newStatus = video.status;
+            let progress = video.progress;
+            
+            if (status.status === 'ready') {
+              newStatus = 'ready';
+              progress = 'Completed';
+            } else if (status.embedding_status === 'processing') {
+              newStatus = 'processing';
+              progress = 'Generating embeddings...';
+            } else if (status.embedding_status === 'pending') {
+              newStatus = 'processing';
+              progress = 'Preparing embedding task...';
+            } else if (status.embedding_status === 'failed') {
+              newStatus = 'error';
+              progress = 'Embedding generation failed';
+            } else if (status.embedding_status === 'cancelled') {
+              newStatus = 'cancelled';
+              progress = 'Cancelled';
+            }
+            
+            if (newStatus !== video.status || progress !== video.progress || status.duration !== video.duration) {
               updatedVideos[i] = {
                 ...video,
-                status: status.status === 'ready' ? 'ready' : 'processing',
+                status: newStatus,
+                progress,
                 duration: status.duration
               };
               hasChanges = true;
@@ -92,7 +116,7 @@ export default function LandingPage() {
       }
     };
 
-    const interval = setInterval(pollStatus, 5000); // Poll every 5 seconds
+    const interval = setInterval(pollStatus, 3000); // Poll every 3 seconds for more responsive updates
     return () => clearInterval(interval);
   }, [uploadedVideos]);
 
@@ -129,6 +153,13 @@ export default function LandingPage() {
     
     const file = files[0];
     
+    // Check file size (500MB limit)
+    const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
+    if (file.size > MAX_FILE_SIZE) {
+      setError(`File too large. Maximum size is 500MB, got ${(file.size / (1024 * 1024)).toFixed(1)}MB`);
+      return;
+    }
+    
     // Check if we already have 2 videos
     if (uploadedVideos.length >= 2) {
       alert('Maximum 2 videos allowed');
@@ -151,7 +182,8 @@ export default function LandingPage() {
       id: `video-${Date.now()}`,
       file,
       thumbnail,
-      status: 'uploading'
+      status: 'uploading',
+      progress: 'Uploading to S3...'
     };
     
     setUploadedVideos(prev => [...prev, newVideo]);
@@ -161,7 +193,13 @@ export default function LandingPage() {
       
       setUploadedVideos(prev => prev.map(video => 
         video.id === newVideo.id 
-          ? { ...video, status: 'processing', video_id: result.video_id, embedding_id: result.embedding_id }
+          ? { 
+              ...video, 
+              status: 'processing', 
+              video_id: result.video_id, 
+              embedding_id: result.embedding_id,
+              progress: 'Starting embedding generation...'
+            }
           : video
       ));
       
@@ -172,6 +210,8 @@ export default function LandingPage() {
       if (error instanceof Error) {
         if (error.message.includes('Failed to fetch')) {
           errorMessage = 'Cannot connect to backend. Please check your connection.';
+        } else if (error.message.includes('File too large')) {
+          errorMessage = error.message;
         } else if (error.message.includes('Upload failed')) {
           errorMessage = error.message;
         }
@@ -189,6 +229,27 @@ export default function LandingPage() {
     
     // Reset file input
     event.target.value = '';
+  };
+
+  const cancelVideo = async (video: LocalVideo) => {
+    if (video.embedding_id && (video.status === 'processing' || video.status === 'uploading')) {
+      try {
+        await api.cancelEmbeddingTask(video.embedding_id);
+        setUploadedVideos(prev => prev.map(v => 
+          v.id === video.id 
+            ? { ...v, status: 'cancelled', progress: 'Cancelled' }
+            : v
+        ));
+      } catch (error) {
+        console.error('Error cancelling task:', error);
+        setError('Failed to cancel task. Please try again.');
+      }
+    } else {
+      // Just remove from list if not processing
+      setUploadedVideos(prev => prev.filter(v => v.id !== video.id));
+    }
+    // Clear any error messages when removing videos
+    setError(null);
   };
 
   const removeVideo = (videoId: string) => {
@@ -216,6 +277,48 @@ export default function LandingPage() {
     });
     
     router.push('/analysis');
+  };
+
+  const getStatusDisplay = (video: LocalVideo) => {
+    switch (video.status) {
+      case 'uploading':
+        return (
+          <div className="flex items-center gap-2 text-sage-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>{video.progress || 'Uploading...'}</span>
+          </div>
+        );
+      case 'processing':
+        return (
+          <div className="flex items-center gap-2 text-sage-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>{video.progress || 'Processing...'}</span>
+          </div>
+        );
+      case 'ready':
+        return (
+          <div className="flex items-center gap-2 text-green-600">
+            <CheckCircle className="w-4 h-4" />
+            <span>Ready</span>
+          </div>
+        );
+      case 'error':
+        return (
+          <div className="flex items-center gap-2 text-red-600">
+            <AlertCircle className="w-4 h-4" />
+            <span>{video.error || 'Error'}</span>
+          </div>
+        );
+      case 'cancelled':
+        return (
+          <div className="flex items-center gap-2 text-gray-500">
+            <StopCircle className="w-4 h-4" />
+            <span>Cancelled</span>
+          </div>
+        );
+      default:
+        return null;
+    }
   };
 
   if (isLoading) {
@@ -311,7 +414,7 @@ export default function LandingPage() {
                   {uploadedVideos.length >= 2 ? 'Maximum videos reached' : 'Choose video file'}
                 </label>
                 <p className="text-sm text-sage-300 mt-2">
-                  MP4 format recommended. Maximum 2 videos.
+                  MP4 format recommended. Maximum 2 videos, 500MB each.
                 </p>
               </div>
             </CardContent>
@@ -352,38 +455,19 @@ export default function LandingPage() {
                       </div>
                       
                       <div className="flex items-center gap-2">
-                        {video.status === 'uploading' && (
-                          <div className="flex items-center gap-2 text-sage-500">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Uploading...
-                          </div>
-                        )}
-                        {video.status === 'processing' && (
-                          <div className="flex items-center gap-2 text-sage-500">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Processing...
-                          </div>
-                        )}
-                        {video.status === 'ready' && (
-                          <div className="flex items-center gap-2 text-green-600">
-                            <CheckCircle className="w-4 h-4" />
-                            Ready
-                          </div>
-                        )}
-                        {video.status === 'error' && (
-                          <div className="flex items-center gap-2 text-red-600">
-                            <AlertCircle className="w-4 h-4" />
-                            {video.error}
-                          </div>
-                        )}
+                        {getStatusDisplay(video)}
                         
                         <Button
-                          onClick={() => removeVideo(video.id)}
+                          onClick={() => cancelVideo(video)}
                           variant="outline"
                           size="sm"
                           className="border-sage-200 hover:bg-sage-50 text-sage-400"
                         >
-                          <X className="w-4 h-4" />
+                          {video.status === 'processing' || video.status === 'uploading' ? (
+                            <StopCircle className="w-4 h-4" />
+                          ) : (
+                            <X className="w-4 h-4" />
+                          )}
                         </Button>
                       </div>
                     </div>

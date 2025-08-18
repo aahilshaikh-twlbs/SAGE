@@ -56,6 +56,10 @@ export interface EmbeddingStatusResponse {
   error?: string;
 }
 
+export interface CancelTaskResponse {
+  message: string;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -104,6 +108,13 @@ class ApiClient {
     }
 
     return response.json();
+  }
+
+  async cancelEmbeddingTask(embeddingId: string): Promise<CancelTaskResponse> {
+    return this.request<CancelTaskResponse>('/cancel-embedding-task', {
+      method: 'POST',
+      body: JSON.stringify({ embedding_id: embeddingId }),
+    });
   }
 
   async compareVideos(

@@ -11,20 +11,34 @@ import hashlib
 import numpy as np
 import tempfile
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import sys
 import boto3
 from botocore.exceptions import ClientError
 import uuid
 import asyncio
+import pytz
 
-# Configure logging
+# Configure logging with PST timezone
+pst = pytz.timezone('US/Pacific')
+
+class PSTFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=pst)
+        if datefmt:
+            return dt.strftime(datefmt)
+        else:
+            return dt.strftime('%Y-%m-%d %H:%M:%S %Z')
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Set the formatter for the root logger
+for handler in logging.root.handlers:
+    handler.setFormatter(PSTFormatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 
 app = FastAPI(title="SAGE Backend", version="2.0.0")
 
@@ -138,6 +152,16 @@ except Exception as e:
     logger.warning("S3 functionality will be disabled. Make sure AWS SSO is configured and you're logged in.")
     s3_client = None
 
+# Storage for videos and embeddings
+embedding_storage: Dict[str, Any] = {}
+video_storage: Dict[str, Dict[str, Any]] = {}
+current_api_key = None
+tl_client = None
+start_time = datetime.now()
+
+# Track active embedding tasks for cancellation
+active_tasks: Dict[str, Any] = {}
+
 def upload_to_s3(file_content: bytes, filename: str, content_type: str = "video/mp4") -> str:
     """Upload a file to S3 and return the S3 URL."""
     if not s3_client:
@@ -146,6 +170,7 @@ def upload_to_s3(file_content: bytes, filename: str, content_type: str = "video/
     file_key = f"videos/{uuid.uuid4()}_{filename}"
     
     try:
+        logger.info(f"Starting S3 upload for {filename} (size: {len(file_content)} bytes)")
         s3_client.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=file_key,
@@ -187,13 +212,6 @@ def get_s3_presigned_url(s3_url: str, expiration: int = 3600) -> str:
     except ClientError as e:
         logger.error(f"Failed to generate presigned URL: {e}")
         raise Exception(f"Presigned URL generation failed: {str(e)}")
-
-# Storage for videos and embeddings
-embedding_storage: Dict[str, Any] = {}
-video_storage: Dict[str, Dict[str, Any]] = {}
-current_api_key = None
-tl_client = None
-start_time = datetime.now()
 
 def load_storage_from_db():
     """Load video and embedding data from database on startup."""
@@ -320,6 +338,9 @@ class HealthResponse(BaseModel):
     database_status: str
     python_version: str
 
+class CancelTaskRequest(BaseModel):
+    embedding_id: str
+
 def get_twelve_labs_client(api_key: str):
     """Get or create TwelveLabs client."""
     global tl_client, current_api_key
@@ -374,8 +395,19 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
     if not file.content_type or not file.content_type.startswith('video/'):
         raise HTTPException(status_code=400, detail="File must be a video")
     
+    # Check file size (limit to 500MB)
+    MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+    file_size = 0
+    
     try:
+        logger.info(f"Starting upload for {file.filename}")
         content = await file.read()
+        file_size = len(content)
+        
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail=f"File too large. Maximum size is 500MB, got {file_size / (1024*1024):.1f}MB")
+        
+        logger.info(f"File {file.filename} read successfully ({file_size / (1024*1024):.1f}MB)")
         
         # Get stored API key from database
         conn = sqlite3.connect(DB_PATH)
@@ -440,7 +472,9 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
         )
         
     except Exception as e:
-        logger.error(f"Error uploading file: {e}")
+        logger.error(f"Error uploading file {file.filename}: {e}")
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail=f"File too large. Maximum size is 500MB, got {file_size / (1024*1024):.1f}MB")
         raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
 
 async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str):
@@ -450,20 +484,26 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         
         # Update status
         embedding_storage[embedding_id]["status"] = "processing"
+        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
         
         # Get TwelveLabs client
         tl = get_twelve_labs_client(api_key)
         
         # Generate presigned URL for TwelveLabs to access the video
+        logger.info(f"Generating presigned URL for {embedding_id}")
         presigned_url = get_s3_presigned_url(s3_url)
         
         # Create embedding task using presigned HTTPS URL
+        logger.info(f"Creating embedding task for {embedding_id}")
         task = tl.embed.task.create(
             model_name="Marengo-retrieval-2.7",
             video_url=presigned_url,
             video_clip_length=2,
             video_embedding_scopes=["clip", "video"]
         )
+        
+        # Store task for potential cancellation
+        active_tasks[embedding_id] = task
         
         logger.info(f"Embedding task {task.id} created for {embedding_id}")
         
@@ -472,6 +512,10 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
             logger.info(f"Task {task.id} status: {task.status}")
         
         task.wait_for_done(sleep_interval=5, callback=on_task_update)
+        
+        # Remove from active tasks
+        if embedding_id in active_tasks:
+            del active_tasks[embedding_id]
         
         # Get completed task
         completed_task = tl.embed.task.retrieve(task.id)
@@ -506,8 +550,40 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         logger.error(f"Error in async embedding generation for {embedding_id}: {e}")
         embedding_storage[embedding_id]["status"] = "failed"
         embedding_storage[embedding_id]["error"] = str(e)
+        
+        # Remove from active tasks
+        if embedding_id in active_tasks:
+            del active_tasks[embedding_id]
+        
         # Save embedding to DB even on failure
         save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
+
+@app.post("/cancel-embedding-task")
+async def cancel_embedding_task(request: CancelTaskRequest):
+    """Cancel an active embedding task."""
+    embedding_id = request.embedding_id
+    
+    if embedding_id not in active_tasks:
+        raise HTTPException(status_code=404, detail="Task not found or already completed")
+    
+    try:
+        task = active_tasks[embedding_id]
+        logger.info(f"Cancelling embedding task {task.id} for {embedding_id}")
+        
+        # Update status to cancelled
+        embedding_storage[embedding_id]["status"] = "cancelled"
+        embedding_storage[embedding_id]["error"] = "Task cancelled by user"
+        save_embedding_to_db(embedding_id, embedding_storage[embedding_id])
+        
+        # Remove from active tasks
+        del active_tasks[embedding_id]
+        
+        logger.info(f"Successfully cancelled embedding task for {embedding_id}")
+        return {"message": "Task cancelled successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error cancelling task for {embedding_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel task: {str(e)}")
 
 @app.post("/compare-local-videos", response_model=ComparisonResponse)
 async def compare_local_videos(
