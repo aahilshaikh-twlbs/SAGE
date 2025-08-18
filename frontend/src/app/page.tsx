@@ -159,16 +159,8 @@ export default function LandingPage() {
       return;
     }
     
-    // Check if this exact file is already uploaded
-    const isDuplicate = uploadedVideos.some(video => 
-      video.file.name === file.name && 
-      video.file.size === file.size
-    );
-    
-    if (isDuplicate) {
-      alert('This video is already uploaded');
-      return;
-    }
+    // Allow selecting the same video twice for comparison
+    // No duplicate check needed - user can compare a video with itself
     
     const thumbnail = await generateThumbnail(file);
     const newVideo: LocalVideo = {
@@ -243,7 +235,17 @@ export default function LandingPage() {
     setError(null);
   };
 
-  const removeVideo = (videoId: string) => {
+  const removeVideo = async (videoId: string) => {
+    const video = uploadedVideos.find(v => v.id === videoId);
+    if (video && video.embedding_id && (video.status === 'processing' || video.status === 'uploading')) {
+      try {
+        await api.cancelEmbeddingTask(video.embedding_id);
+      } catch (error) {
+        console.error('Error cancelling task during removal:', error);
+        // Continue with removal even if cancellation fails
+      }
+    }
+    
     setUploadedVideos(prev => prev.filter(video => video.id !== videoId));
     // Clear any error messages when removing videos
     setError(null);

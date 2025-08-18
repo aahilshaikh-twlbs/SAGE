@@ -146,7 +146,7 @@ export default function AnalysisPage() {
   };
 
   const seekToTime = (time: number) => {
-    if (video1Ref.current && video2Ref.current) {
+    if (video1Ref.current && video2Ref.current && video1Data && video2Data) {
       // Constrain time to the shorter video's duration to prevent out-of-bounds
       const constrainedTime = Math.min(time, Math.min(video1Data.duration, video2Data.duration));
       video1Ref.current.currentTime = constrainedTime;
