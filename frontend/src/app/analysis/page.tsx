@@ -180,13 +180,17 @@ export default function AnalysisPage() {
     // Special color for full video comparison
     if (isFullVideo) return 'bg-[#9B9896]'; // Medium grey for overall comparison
     
-    if (distance === Infinity) return 'bg-[#DC2626]'; // Dark Red for missing segments
-    if (distance > 0.4) return 'bg-[#EF4444]'; // Red for major differences
-    if (distance > 0.3) return 'bg-[#F97316]'; // Orange for significant differences
-    if (distance > 0.2) return 'bg-[#F59E0B]'; // Amber for moderate differences
-    if (distance > 0.1) return 'bg-[#84CC16]'; // Lime for minor differences
-    if (distance > 0.05) return 'bg-[#EAB308]'; // Yellow for very minor differences
-    return 'bg-[#06B6D4]'; // Cyan for minimal differences
+    if (distance >= 999999.0) return 'bg-[#DC2626]'; // Dark Red for missing segments
+    
+    // Cosine distance scale: 0 = identical, 1 = orthogonal, 2 = completely different
+    // Colors: Green (similar) -> Yellow -> Orange -> Red (different)
+    if (distance >= 1.5) return 'bg-[#DC2626]'; // Dark Red for completely different
+    if (distance >= 1.0) return 'bg-[#EF4444]'; // Red for very different (orthogonal+)
+    if (distance >= 0.7) return 'bg-[#F97316]'; // Orange for significantly different
+    if (distance >= 0.5) return 'bg-[#F59E0B]'; // Amber for moderately different
+    if (distance >= 0.3) return 'bg-[#EAB308]'; // Yellow for somewhat different
+    if (distance >= 0.1) return 'bg-[#84CC16]'; // Lime for slightly different
+    return 'bg-[#06B6D4]'; // Cyan for very similar (close to identical)
   };
 
   const formatTime = (seconds: number) => {
