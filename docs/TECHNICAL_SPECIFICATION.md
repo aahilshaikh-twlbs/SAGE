@@ -471,3 +471,4 @@ interface SystemConfig {
 ---
 
 This technical specification provides the conceptual foundation for building a video comparison system from scratch, focusing on the core concepts, architecture, and functionality rather than specific implementation details.
+
