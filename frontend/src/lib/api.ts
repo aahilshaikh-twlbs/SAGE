@@ -111,9 +111,14 @@ class ApiClient {
   }
 
   async cancelEmbeddingTask(embeddingId: string): Promise<CancelTaskResponse> {
-    return this.request<CancelTaskResponse>('/cancel-embedding-task', {
+    return this.request<CancelTaskResponse>(`/cancel-embedding-task/${embeddingId}`, {
       method: 'POST',
-      body: JSON.stringify({ embedding_id: embeddingId }),
+    });
+  }
+
+  async cancelVideo(videoId: string): Promise<CancelTaskResponse> {
+    return this.request<CancelTaskResponse>(`/cancel-video/${videoId}`, {
+      method: 'POST',
     });
   }
 

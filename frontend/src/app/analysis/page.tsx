@@ -149,9 +149,24 @@ export default function AnalysisPage() {
     if (video1Ref.current && video2Ref.current && video1Data && video2Data) {
       // Constrain time to the shorter video's duration to prevent out-of-bounds
       const constrainedTime = Math.min(time, Math.min(video1Data.duration, video2Data.duration));
+      
+      // Pause videos first to ensure seeking works properly
+      video1Ref.current.pause();
+      video2Ref.current.pause();
+      setIsPlaying(false);
+      
+      // Set the time
       video1Ref.current.currentTime = constrainedTime;
       video2Ref.current.currentTime = constrainedTime;
       setCurrentTime(constrainedTime);
+      
+      // Resume playback if it was playing
+      setTimeout(() => {
+        if (isPlaying) {
+          video1Ref.current?.play();
+          video2Ref.current?.play();
+        }
+      }, 100);
     }
   };
 
@@ -197,9 +212,10 @@ export default function AnalysisPage() {
   }
 
   // Calculate similarity based on the actual comparison results
+  // Use the backend's similarity calculation which is based on segments that are NOT different
   const similarityPercent = totalSegments > 0 
-    ? Math.max(0, 100 - (differences.length / totalSegments * 100)).toFixed(1)
-    : '0';
+    ? ((totalSegments - differences.length) / totalSegments * 100).toFixed(1)
+    : '100';
 
   // Use the longer video's duration for timeline
   const maxDuration = Math.max(video1Data.duration, video2Data.duration);
@@ -342,7 +358,7 @@ export default function AnalysisPage() {
               {/* Timeline with Markers */}
               <div className="relative space-y-2">
                 {/* Difference visualization bar */}
-                <div className="relative h-8 bg-[#F4F3F3] rounded overflow-hidden">
+                <div className="relative h-8 bg-[#F4F3F3] rounded overflow-hidden border border-[#D3D1CF]">
                   {differences.map((diff, index) => {
                     const startPercent = (diff.start_sec / maxDuration) * 100;
                     const widthPercent = ((diff.end_sec - diff.start_sec) / maxDuration) * 100;
@@ -351,12 +367,12 @@ export default function AnalysisPage() {
                     return (
                       <div
                         key={index}
-                        className={`absolute h-full ${getSeverityColor(diff.distance, isFullVideo)} opacity-70 hover:opacity-100 transition-opacity cursor-pointer`}
+                        className={`absolute h-full ${getSeverityColor(diff.distance, isFullVideo)} opacity-80 hover:opacity-100 transition-opacity cursor-pointer border border-white/20`}
                         style={{ 
                           left: `${startPercent}%`,
                           width: `${Math.max(1, widthPercent)}%`
                         }}
-                        title={`${formatTime(diff.start_sec)} - ${formatTime(diff.end_sec)}: Distance ${diff.distance.toFixed(3)}`}
+                        title={`Click to jump to ${formatTime(diff.start_sec)} - ${formatTime(diff.end_sec)} (Distance: ${diff.distance.toFixed(3)})`}
                         onClick={() => seekToTime(diff.start_sec)}
                       />
                     );
@@ -370,6 +386,12 @@ export default function AnalysisPage() {
                       style={{ left: `${(i + 1) * 20}%` }}
                     />
                   ))}
+                  
+                  {/* Time labels */}
+                  <div className="absolute -bottom-6 left-0 right-0 flex justify-between text-xs text-[#9B9896]">
+                    <span>0:00</span>
+                    <span>{formatTime(maxDuration)}</span>
+                  </div>
                 </div>
                 
                 {/* Main playback track */}

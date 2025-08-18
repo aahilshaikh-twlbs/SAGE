@@ -57,6 +57,11 @@ class DifferenceSegment(BaseModel):
     start_sec: float
     end_sec: float
     distance: float
+    
+    class Config:
+        json_encoders = {
+            float: lambda v: float(v) if v != float('inf') else 999999.0
+        }
 
 class ComparisonResponse(BaseModel):
     filename1: str
@@ -86,7 +91,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://tl-sage.vercel.app"
+        "https://tl-sage.vercel.app",
+        "https://tl-sage.vercel.app/",
+        "https://tl-sage.vercel.app/*"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -545,6 +552,12 @@ async def compare_local_videos(
             } for seg in embed_data2["embeddings"].segments]
         
         logger.info(f"Comparing {len(segments1)} segments from video1 with {len(segments2)} segments from video2, threshold: {threshold}")
+        logger.info(f"Video1 segments: {[(s['start_offset_sec'], s['end_offset_sec']) for s in segments1]}")
+        logger.info(f"Video2 segments: {[(s['start_offset_sec'], s['end_offset_sec']) for s in segments2]}")
+        logger.info(f"Embedding data1 keys: {list(embed_data1.keys())}")
+        logger.info(f"Embedding data2 keys: {list(embed_data2.keys())}")
+        logger.info(f"Embedding1 has embeddings: {embed_data1.get('embeddings') is not None}")
+        logger.info(f"Embedding2 has embeddings: {embed_data2.get('embeddings') is not None}")
         
         # Get video durations for proper timeline handling
         duration1 = embed_data1.get("duration", 0)
@@ -573,13 +586,15 @@ async def compare_local_videos(
             differing_segments.append(DifferenceSegment(
                 start_sec=0,
                 end_sec=max_duration,
-                distance=float('inf')
+                distance=999999.0  # Use large number instead of infinity
             ))
         else:
-            # Compare corresponding segments
+            # Compare corresponding segments - this should give us exactly min_segments results
             for i in range(min_segments):
                 seg1 = segments1[i]
                 seg2 = segments2[i]
+                
+                logger.info(f"Comparing segment {i}: Video1 {seg1['start_offset_sec']}-{seg1['end_offset_sec']}s vs Video2 {seg2['start_offset_sec']}-{seg2['end_offset_sec']}s")
                 
                 # Calculate distance between embeddings
                 v1 = np.array(seg1["embedding"], dtype=np.float32)
@@ -598,6 +613,9 @@ async def compare_local_videos(
                 all_distances.append(float(dist))
                 matched_segments += 1
                 
+                logger.info(f"Segment {i} distance: {dist:.4f} (threshold: {threshold})")
+                
+                # Only add segments that exceed the threshold
                 if float(dist) > threshold:
                     differing_segments.append(DifferenceSegment(
                         start_sec=seg1["start_offset_sec"],
@@ -605,30 +623,49 @@ async def compare_local_videos(
                         distance=float(dist)
                     ))
             
-            # Handle remaining segments if videos have different lengths
+            # Only add remaining segments if they don't overlap with existing ones
             if len(segments1) > len(segments2):
-                # Video1 has more segments - mark remaining as different
+                # Video1 has more segments - only add if they don't overlap
                 for i in range(len(segments2), len(segments1)):
                     seg = segments1[i]
-                    differing_segments.append(DifferenceSegment(
-                        start_sec=seg["start_offset_sec"],
-                        end_sec=seg["end_offset_sec"],
-                        distance=float('inf')
-                    ))
+                    # Check if this segment overlaps with any existing segment
+                    overlaps = False
+                    for existing in differing_segments:
+                        if (seg["start_offset_sec"] < existing.end_sec and 
+                            seg["end_offset_sec"] > existing.start_sec):
+                            overlaps = True
+                            break
+                    
+                    if not overlaps:
+                        differing_segments.append(DifferenceSegment(
+                            start_sec=seg["start_offset_sec"],
+                            end_sec=seg["end_offset_sec"],
+                            distance=999999.0  # Use large number instead of infinity
+                        ))
             elif len(segments2) > len(segments1):
-                # Video2 has more segments - mark remaining as different
+                # Video2 has more segments - only add if they don't overlap
                 for i in range(len(segments1), len(segments2)):
                     seg = segments2[i]
-                    differing_segments.append(DifferenceSegment(
-                        start_sec=seg["start_offset_sec"],
-                        end_sec=seg["end_offset_sec"],
-                        distance=float('inf')
-                    ))
+                    # Check if this segment overlaps with any existing segment
+                    overlaps = False
+                    for existing in differing_segments:
+                        if (seg["start_offset_sec"] < existing.end_sec and 
+                            seg["end_offset_sec"] > existing.start_sec):
+                            overlaps = True
+                            break
+                    
+                    if not overlaps:
+                        differing_segments.append(DifferenceSegment(
+                            start_sec=seg["start_offset_sec"],
+                            end_sec=seg["end_offset_sec"],
+                            distance=999999.0  # Use large number instead of infinity
+                        ))
         
-        # Calculate similarity percentage
-        if matched_segments > 0:
-            avg_distance = np.mean(all_distances) if all_distances else 0
-            similarity_percent = max(0, 100 - (avg_distance * 100))
+        # Calculate similarity percentage based on segments that are NOT different
+        if min_segments > 0:
+            # Calculate similarity as percentage of segments that are similar (below threshold)
+            similar_segments = min_segments - len(differing_segments)
+            similarity_percent = max(0, (similar_segments / min_segments) * 100)
         else:
             similarity_percent = 0
         
@@ -650,6 +687,9 @@ async def compare_local_videos(
         
     except Exception as e:
         logger.error(f"Error comparing videos: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to compare videos: {str(e)}")
 
 @app.get("/serve-video/{video_id}")
@@ -714,6 +754,84 @@ async def get_video_status(video_id: str):
             "duration": video_data.get("duration"),
             "upload_timestamp": video_data["upload_timestamp"]
         }
+
+@app.post("/cancel-video/{video_id}")
+async def cancel_video_processing(video_id: str):
+    """Cancel video processing and cleanup resources."""
+    try:
+        logger.info(f"Cancelling video processing for {video_id}")
+        
+        if video_id not in video_storage:
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        video_data = video_storage[video_id]
+        embedding_id = video_data.get("embedding_id")
+        
+        # Cancel embedding task if it exists and is still processing
+        if embedding_id and embedding_id in embedding_storage:
+            embed_data = embedding_storage[embedding_id]
+            if embed_data["status"] in ["processing", "pending"]:
+                logger.info(f"Cancelling embedding task for {embedding_id}")
+                try:
+                    # Cancel the TwelveLabs task
+                    if "task_id" in embed_data:
+                        task_id = embed_data["task_id"]
+                        twelve_labs_client = get_twelve_labs_client()
+                        twelve_labs_client.embed_tasks.delete(task_id)
+                        logger.info(f"Cancelled TwelveLabs task {task_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to cancel TwelveLabs task: {e}")
+                
+                # Mark embedding as cancelled
+                embed_data["status"] = "cancelled"
+                embed_data["error"] = "Cancelled by user"
+        
+        # Remove from storage
+        del video_storage[video_id]
+        if embedding_id and embedding_id in embedding_storage:
+            del embedding_storage[embedding_id]
+        
+        logger.info(f"Successfully cancelled and cleaned up {video_id}")
+        return {"message": "Video processing cancelled successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error cancelling video {video_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel video: {str(e)}")
+
+@app.post("/cancel-embedding-task/{embedding_id}")
+async def cancel_embedding_task(embedding_id: str):
+    """Cancel a specific embedding task."""
+    try:
+        logger.info(f"Cancelling embedding task for {embedding_id}")
+        
+        if embedding_id not in embedding_storage:
+            raise HTTPException(status_code=404, detail="Embedding not found")
+        
+        embed_data = embedding_storage[embedding_id]
+        
+        if embed_data["status"] not in ["processing", "pending"]:
+            raise HTTPException(status_code=400, detail="Embedding is not in a cancellable state")
+        
+        # Cancel the TwelveLabs task
+        if "task_id" in embed_data:
+            task_id = embed_data["task_id"]
+            try:
+                twelve_labs_client = get_twelve_labs_client()
+                twelve_labs_client.embed_tasks.delete(task_id)
+                logger.info(f"Cancelled TwelveLabs task {task_id}")
+            except Exception as e:
+                logger.warning(f"Failed to cancel TwelveLabs task: {e}")
+        
+        # Mark as cancelled
+        embed_data["status"] = "cancelled"
+        embed_data["error"] = "Cancelled by user"
+        
+        logger.info(f"Successfully cancelled embedding task {embedding_id}")
+        return {"message": "Embedding task cancelled successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error cancelling embedding task {embedding_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel embedding task: {str(e)}")
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():

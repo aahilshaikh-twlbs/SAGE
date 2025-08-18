@@ -218,17 +218,18 @@ export default function LandingPage() {
   };
 
   const cancelVideo = async (video: LocalVideo) => {
-    if (video.embedding_id && (video.status === 'processing' || video.status === 'uploading')) {
+    if (video.video_id && (video.status === 'processing' || video.status === 'uploading')) {
       try {
-        await api.cancelEmbeddingTask(video.embedding_id);
+        // Cancel the entire video processing (includes embedding task)
+        await api.cancelVideo(video.video_id);
         setUploadedVideos(prev => prev.map(v => 
           v.id === video.id 
             ? { ...v, status: 'cancelled', progress: 'Cancelled' }
             : v
         ));
       } catch (error) {
-        console.error('Error cancelling task:', error);
-        setError('Failed to cancel task. Please try again.');
+        console.error('Error cancelling video:', error);
+        setError('Failed to cancel video. Please try again.');
       }
     } else {
       // Just remove from list if not processing
@@ -240,11 +241,12 @@ export default function LandingPage() {
 
   const removeVideo = async (videoId: string) => {
     const video = uploadedVideos.find(v => v.id === videoId);
-    if (video && video.embedding_id && (video.status === 'processing' || video.status === 'uploading')) {
+    if (video && video.video_id && (video.status === 'processing' || video.status === 'uploading')) {
       try {
-        await api.cancelEmbeddingTask(video.embedding_id);
+        // Cancel the entire video processing
+        await api.cancelVideo(video.video_id);
       } catch (error) {
-        console.error('Error cancelling task during removal:', error);
+        console.error('Error cancelling video during removal:', error);
         // Continue with removal even if cancellation fails
       }
     }
