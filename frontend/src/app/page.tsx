@@ -63,65 +63,80 @@ export default function LandingPage() {
 
   // Poll for video status updates
   useEffect(() => {
-    if (uploadedVideos.length === 0) return;
-
     const pollStatus = async () => {
-      const updatedVideos = [...uploadedVideos];
-      let hasChanges = false;
+      // Get current videos using functional update to avoid stale closure
+      setUploadedVideos(currentVideos => {
+        // Don't poll if no videos or no videos need polling
+        const needsPolling = currentVideos.some(v => 
+          v.video_id && (v.status === 'processing' || v.status === 'uploading' || v.status === 'uploaded')
+        );
+        
+        if (currentVideos.length === 0 || !needsPolling) return currentVideos;
+        
+        const updatedVideos = [...currentVideos];
+        let hasChanges = false;
 
-      for (let i = 0; i < updatedVideos.length; i++) {
-        const video = updatedVideos[i];
-        if (video.video_id && (video.status === 'processing' || video.status === 'uploading' || video.status === 'uploaded')) {
-          try {
-            const status = await api.getVideoStatus(video.video_id);
-            
-            // Determine the current stage based on status
-            let newStatus: LocalVideo['status'] = video.status;
-            let progress = video.progress;
-            
-            if (status.status === 'ready') {
-              newStatus = 'ready';
-              progress = 'Completed';
-            } else if (status.embedding_status === 'processing') {
-              newStatus = 'processing';
-              progress = 'Generating embeddings...';
-            } else if (status.embedding_status === 'pending') {
-              newStatus = 'processing';
-              progress = 'Preparing embedding task...';
-            } else if (status.embedding_status === 'failed') {
-              newStatus = 'error';
-              progress = 'Embedding generation failed';
-            } else if (status.embedding_status === 'cancelled') {
-              newStatus = 'cancelled';
-              progress = 'Cancelled';
-            } else if (status.status === 'uploaded' && status.embedding_status === 'pending') {
-              newStatus = 'processing';
-              progress = 'Starting embedding generation...';
+                 // Process each video that needs polling
+         for (let i = 0; i < updatedVideos.length; i++) {
+           const video = updatedVideos[i];
+           if (video.video_id && (video.status === 'processing' || video.status === 'uploading' || video.status === 'uploaded')) {
+             try {
+               // Use a separate async function to handle the API call
+               (async () => {
+                 try {
+                   const status = await api.getVideoStatus(video.video_id!);
+                  
+                  // Determine the current stage based on status
+                  let newStatus: LocalVideo['status'] = video.status;
+                  let progress = video.progress;
+                  
+                  if (status.status === 'ready') {
+                    newStatus = 'ready';
+                    progress = 'Completed';
+                  } else if (status.embedding_status === 'processing') {
+                    newStatus = 'processing';
+                    progress = 'Generating embeddings...';
+                  } else if (status.embedding_status === 'pending') {
+                    newStatus = 'processing';
+                    progress = 'Preparing embedding task...';
+                  } else if (status.embedding_status === 'failed') {
+                    newStatus = 'error';
+                    progress = 'Embedding generation failed';
+                  } else if (status.embedding_status === 'cancelled') {
+                    newStatus = 'cancelled';
+                    progress = 'Cancelled';
+                  } else if (status.status === 'uploaded' && status.embedding_status === 'pending') {
+                    newStatus = 'processing';
+                    progress = 'Starting embedding generation...';
+                  }
+                  
+                  // Update the video if there are changes
+                  if (newStatus !== video.status || progress !== video.progress || status.duration !== video.duration) {
+                    setUploadedVideos(prevVideos => 
+                      prevVideos.map(v => 
+                        v.id === video.id 
+                          ? { ...v, status: newStatus, progress, duration: status.duration }
+                          : v
+                      )
+                    );
+                  }
+                } catch (error) {
+                  console.error('Error checking video status:', error);
+                }
+              })();
+            } catch (error) {
+              console.error('Error in polling loop:', error);
             }
-            
-            if (newStatus !== video.status || progress !== video.progress || status.duration !== video.duration) {
-              updatedVideos[i] = {
-                ...video,
-                status: newStatus,
-                progress,
-                duration: status.duration
-              };
-              hasChanges = true;
-            }
-          } catch (error) {
-            console.error('Error checking video status:', error);
           }
         }
-      }
 
-      if (hasChanges) {
-        setUploadedVideos(updatedVideos);
-      }
+        return updatedVideos;
+      });
     };
 
     const interval = setInterval(pollStatus, 3000); // Poll every 3 seconds for more responsive updates
     return () => clearInterval(interval);
-  }, [uploadedVideos]);
+  }, []); // Empty dependency array to prevent re-creation of polling
 
   const handleKeyValidated = (key: string) => {
     localStorage.setItem('sage_api_key', key);
