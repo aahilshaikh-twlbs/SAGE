@@ -76,7 +76,7 @@ export default function LandingPage() {
             const status = await api.getVideoStatus(video.video_id);
             
             // Determine the current stage based on status
-            let newStatus = video.status;
+            let newStatus: LocalVideo['status'] = video.status;
             let progress = video.progress;
             
             if (status.status === 'ready') {
