@@ -526,6 +526,7 @@ async def compare_local_videos(
         if embed_data2["status"] != "completed":
             raise HTTPException(status_code=400, detail=f"Embedding {embedding_id2} is not ready. Status: {embed_data2['status']}")
         
+        # Get actual embedding segments from TwelveLabs
         segments1 = []
         segments2 = []
         
@@ -552,7 +553,7 @@ async def compare_local_videos(
         
         logger.info(f"Video durations - Video1: {duration1}s, Video2: {duration2}s, Max: {max_duration}s")
         
-        # Compare segments using a more flexible matching approach
+        # Compare segments using actual embedding data
         differing_segments = []
         all_distances = []
         matched_segments = 0
@@ -565,18 +566,22 @@ async def compare_local_videos(
                     return seg
             return None
         
-        # Compare segments at regular intervals
-        interval = 2.0  # 2-second intervals for comparison
-        total_intervals = int(max_duration / interval) + 1
-        
-        for i in range(total_intervals):
-            time_sec = i * interval
-            
-            seg1 = get_segment_at_time(segments1, time_sec)
-            seg2 = get_segment_at_time(segments2, time_sec)
-            
-            if seg1 and seg2:
-                # Both videos have segments at this time - compare them
+        # Compare segments at regular intervals based on the shorter video's segments
+        min_segments = min(len(segments1), len(segments2))
+        if min_segments == 0:
+            # One video has no segments - mark entire duration as different
+            differing_segments.append(DifferenceSegment(
+                start_sec=0,
+                end_sec=max_duration,
+                distance=float('inf')
+            ))
+        else:
+            # Compare corresponding segments
+            for i in range(min_segments):
+                seg1 = segments1[i]
+                seg2 = segments2[i]
+                
+                # Calculate distance between embeddings
                 v1 = np.array(seg1["embedding"], dtype=np.float32)
                 v2 = np.array(seg2["embedding"], dtype=np.float32)
                 
@@ -595,18 +600,30 @@ async def compare_local_videos(
                 
                 if float(dist) > threshold:
                     differing_segments.append(DifferenceSegment(
-                        start_sec=time_sec,
-                        end_sec=min(time_sec + interval, max_duration),
+                        start_sec=seg1["start_offset_sec"],
+                        end_sec=seg1["end_offset_sec"],
                         distance=float(dist)
                     ))
             
-            elif seg1 or seg2:
-                # One video has a segment but the other doesn't - mark as difference
-                differing_segments.append(DifferenceSegment(
-                    start_sec=time_sec,
-                    end_sec=min(time_sec + interval, max_duration),
-                    distance=float('inf')
-                ))
+            # Handle remaining segments if videos have different lengths
+            if len(segments1) > len(segments2):
+                # Video1 has more segments - mark remaining as different
+                for i in range(len(segments2), len(segments1)):
+                    seg = segments1[i]
+                    differing_segments.append(DifferenceSegment(
+                        start_sec=seg["start_offset_sec"],
+                        end_sec=seg["end_offset_sec"],
+                        distance=float('inf')
+                    ))
+            elif len(segments2) > len(segments1):
+                # Video2 has more segments - mark remaining as different
+                for i in range(len(segments1), len(segments2)):
+                    seg = segments2[i]
+                    differing_segments.append(DifferenceSegment(
+                        start_sec=seg["start_offset_sec"],
+                        end_sec=seg["end_offset_sec"],
+                        distance=float('inf')
+                    ))
         
         # Calculate similarity percentage
         if matched_segments > 0:
@@ -620,13 +637,13 @@ async def compare_local_videos(
             logger.info(f"Similarity: {similarity_percent:.1f}%")
         
         logger.info(f"Found {len(differing_segments)} differences with threshold {threshold}")
-        logger.info(f"Matched segments: {matched_segments}, Total intervals: {total_intervals}")
+        logger.info(f"Matched segments: {matched_segments}, Total segments: {min_segments}")
         
         return ComparisonResponse(
             filename1=embed_data1["filename"],
             filename2=embed_data2["filename"],
             differences=differing_segments,
-            total_segments=total_intervals,
+            total_segments=min_segments,
             differing_segments=len(differing_segments),
             threshold_used=threshold
         )

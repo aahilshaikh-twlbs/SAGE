@@ -14,7 +14,7 @@ interface LocalVideo {
   thumbnail: string;
   video_id?: string;
   embedding_id?: string;
-  status: 'uploading' | 'processing' | 'ready' | 'error' | 'cancelled';
+  status: 'uploading' | 'processing' | 'ready' | 'error' | 'cancelled' | 'uploaded';
   error?: string;
   duration?: number;
   progress?: string;
@@ -71,7 +71,7 @@ export default function LandingPage() {
 
       for (let i = 0; i < updatedVideos.length; i++) {
         const video = updatedVideos[i];
-        if (video.video_id && (video.status === 'processing' || video.status === 'uploading')) {
+        if (video.video_id && (video.status === 'processing' || video.status === 'uploading' || video.status === 'uploaded')) {
           try {
             const status = await api.getVideoStatus(video.video_id);
             
@@ -94,6 +94,9 @@ export default function LandingPage() {
             } else if (status.embedding_status === 'cancelled') {
               newStatus = 'cancelled';
               progress = 'Cancelled';
+            } else if (status.status === 'uploaded' && status.embedding_status === 'pending') {
+              newStatus = 'processing';
+              progress = 'Starting embedding generation...';
             }
             
             if (newStatus !== video.status || progress !== video.progress || status.duration !== video.duration) {
@@ -307,6 +310,13 @@ export default function LandingPage() {
           <div className="flex items-center gap-2 text-gray-500">
             <StopCircle className="w-4 h-4" />
             <span>Cancelled</span>
+          </div>
+        );
+      case 'uploaded':
+        return (
+          <div className="flex items-center gap-2 text-sage-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Starting embedding generation...</span>
           </div>
         );
       default:
