@@ -663,8 +663,9 @@ async def compare_local_videos(
         
         # Calculate similarity percentage based on segments that are NOT different
         if min_segments > 0:
-            # Calculate similarity as percentage of segments that are similar (below threshold)
-            similar_segments = min_segments - len(differing_segments)
+            # Only count segments that were actually compared (not the 999999.0 ones)
+            actual_differing = len([d for d in differing_segments if d.distance < 999999.0])
+            similar_segments = min_segments - actual_differing
             similarity_percent = max(0, (similar_segments / min_segments) * 100)
         else:
             similarity_percent = 0
@@ -673,8 +674,15 @@ async def compare_local_videos(
             logger.info(f"Distance stats - Min: {min(all_distances):.4f}, Max: {max(all_distances):.4f}, Mean: {np.mean(all_distances):.4f}")
             logger.info(f"Similarity: {similarity_percent:.1f}%")
         
-        logger.info(f"Found {len(differing_segments)} differences with threshold {threshold}")
+        # Count actual differing segments (excluding 999999.0 ones)
+        actual_differing = len([d for d in differing_segments if d.distance < 999999.0])
+        extra_segments = len([d for d in differing_segments if d.distance >= 999999.0])
+        
+        logger.info(f"Found {len(differing_segments)} total segments in response")
+        logger.info(f"  - {actual_differing} actual differing segments (distance > {threshold})")
+        logger.info(f"  - {extra_segments} extra segments from different video lengths")
         logger.info(f"Matched segments: {matched_segments}, Total segments: {min_segments}")
+        logger.info(f"Similarity calculation: {min_segments - actual_differing}/{min_segments} = {similarity_percent:.1f}%")
         
         return ComparisonResponse(
             filename1=embed_data1["filename"],

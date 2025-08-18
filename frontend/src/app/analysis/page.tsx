@@ -213,8 +213,10 @@ export default function AnalysisPage() {
 
   // Calculate similarity based on the actual comparison results
   // Use the backend's similarity calculation which is based on segments that are NOT different
+  // Only count segments that were actually compared (not the 999999.0 ones)
+  const actualDifferences = differences.filter(d => d.distance < 999999.0).length;
   const similarityPercent = totalSegments > 0 
-    ? ((totalSegments - differences.length) / totalSegments * 100).toFixed(1)
+    ? ((totalSegments - actualDifferences) / totalSegments * 100).toFixed(1)
     : '100';
 
   // Use the longer video's duration for timeline
