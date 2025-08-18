@@ -395,14 +395,8 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
     if not file.content_type or not file.content_type.startswith('video/'):
         raise HTTPException(status_code=400, detail="File must be a video")
     
-    file_size = 0
-    
     try:
         logger.info(f"Starting upload for {file.filename}")
-        content = await file.read()
-        file_size = len(content)
-        
-        logger.info(f"File {file.filename} read successfully ({file_size / (1024*1024):.1f}MB)")
         
         # Get stored API key from database
         conn = sqlite3.connect(DB_PATH)
@@ -424,9 +418,9 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
         
         api_key = stored_api_key[0]
         
-        # Upload to S3 first
-        logger.info(f"Uploading file {file.filename} to S3...")
-        s3_url = upload_to_s3(content, file.filename)
+        # Upload to S3 using streaming to avoid memory issues
+        logger.info(f"Uploading file {file.filename} to S3 using streaming...")
+        s3_url = await upload_to_s3_streaming(file)
         
         # Generate unique IDs
         video_id = f"video_{uuid.uuid4()}"
@@ -469,6 +463,83 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Error uploading file {file.filename}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+
+async def upload_to_s3_streaming(file: UploadFile) -> str:
+    """Upload a file to S3 using streaming to avoid memory issues."""
+    if not s3_client:
+        raise Exception("S3 client not initialized")
+    
+    file_key = f"videos/{uuid.uuid4()}_{file.filename}"
+    
+    try:
+        logger.info(f"Starting streaming S3 upload for {file.filename}")
+        
+        # Use multipart upload for large files
+        response = s3_client.create_multipart_upload(
+            Bucket=S3_BUCKET_NAME,
+            Key=file_key,
+            ContentType=file.content_type,
+            Metadata={
+                'original_filename': file.filename,
+                'upload_timestamp': datetime.now().isoformat()
+            }
+        )
+        
+        upload_id = response['UploadId']
+        parts = []
+        part_number = 1
+        chunk_size = 10 * 1024 * 1024  # 10MB chunks
+        
+        try:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                
+                logger.info(f"Uploading part {part_number} for {file.filename} ({len(chunk)} bytes)")
+                
+                part_response = s3_client.upload_part(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=file_key,
+                    PartNumber=part_number,
+                    UploadId=upload_id,
+                    Body=chunk
+                )
+                
+                parts.append({
+                    'ETag': part_response['ETag'],
+                    'PartNumber': part_number
+                })
+                
+                part_number += 1
+            
+            # Complete multipart upload
+            s3_client.complete_multipart_upload(
+                Bucket=S3_BUCKET_NAME,
+                Key=file_key,
+                UploadId=upload_id,
+                MultipartUpload={'Parts': parts}
+            )
+            
+            s3_url = f"s3://{S3_BUCKET_NAME}/{file_key}"
+            logger.info(f"File uploaded to S3: {s3_url}")
+            return s3_url
+            
+        except Exception as e:
+            # Abort multipart upload on error
+            try:
+                s3_client.abort_multipart_upload(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=file_key,
+                    UploadId=upload_id
+                )
+            except:
+                pass
+            raise e
+        
+    except ClientError as e:
+        logger.error(f"Failed to upload file to S3: {e}")
+        raise Exception(f"S3 upload failed: {str(e)}")
 
 async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str):
     """Asynchronously generate embeddings for a video from S3."""
@@ -784,6 +855,45 @@ async def root():
         "message": "SAGE API",
         "docs": "/docs"
     }
+
+@app.delete("/cleanup-old-videos")
+async def cleanup_old_videos(days_old: int = Query(7, description="Delete videos older than this many days")):
+    """Clean up old videos and embeddings from the database."""
+    try:
+        cutoff_date = datetime.now() - timedelta(days=days_old)
+        cutoff_str = cutoff_date.isoformat()
+        
+        conn = sqlite3.connect(DB_PATH)
+        
+        # Get videos to delete
+        cursor = conn.execute(
+            'SELECT video_id, embedding_id FROM videos WHERE upload_timestamp < ?',
+            (cutoff_str,)
+        )
+        videos_to_delete = cursor.fetchall()
+        
+        deleted_count = 0
+        for video_id, embedding_id in videos_to_delete:
+            # Remove from memory storage
+            if video_id in video_storage:
+                del video_storage[video_id]
+            if embedding_id in embedding_storage:
+                del embedding_storage[embedding_id]
+            
+            # Remove from database
+            conn.execute('DELETE FROM videos WHERE video_id = ?', (video_id,))
+            conn.execute('DELETE FROM embeddings WHERE embedding_id = ?', (embedding_id,))
+            deleted_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Cleaned up {deleted_count} videos older than {days_old} days")
+        return {"message": f"Cleaned up {deleted_count} videos", "deleted_count": deleted_count}
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up old videos: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cleanup videos: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
