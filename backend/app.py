@@ -395,17 +395,12 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
     if not file.content_type or not file.content_type.startswith('video/'):
         raise HTTPException(status_code=400, detail="File must be a video")
     
-    # Check file size (limit to 500MB)
-    MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
     file_size = 0
     
     try:
         logger.info(f"Starting upload for {file.filename}")
         content = await file.read()
         file_size = len(content)
-        
-        if file_size > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail=f"File too large. Maximum size is 500MB, got {file_size / (1024*1024):.1f}MB")
         
         logger.info(f"File {file.filename} read successfully ({file_size / (1024*1024):.1f}MB)")
         
@@ -473,8 +468,6 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
         
     except Exception as e:
         logger.error(f"Error uploading file {file.filename}: {e}")
-        if file_size > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail=f"File too large. Maximum size is 500MB, got {file_size / (1024*1024):.1f}MB")
         raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
 
 async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str):

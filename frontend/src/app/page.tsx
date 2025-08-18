@@ -153,13 +153,6 @@ export default function LandingPage() {
     
     const file = files[0];
     
-    // Check file size (500MB limit)
-    const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
-    if (file.size > MAX_FILE_SIZE) {
-      setError(`File too large. Maximum size is 500MB, got ${(file.size / (1024 * 1024)).toFixed(1)}MB`);
-      return;
-    }
-    
     // Check if we already have 2 videos
     if (uploadedVideos.length >= 2) {
       alert('Maximum 2 videos allowed');
@@ -210,8 +203,6 @@ export default function LandingPage() {
       if (error instanceof Error) {
         if (error.message.includes('Failed to fetch')) {
           errorMessage = 'Cannot connect to backend. Please check your connection.';
-        } else if (error.message.includes('File too large')) {
-          errorMessage = error.message;
         } else if (error.message.includes('Upload failed')) {
           errorMessage = error.message;
         }
@@ -414,7 +405,7 @@ export default function LandingPage() {
                   {uploadedVideos.length >= 2 ? 'Maximum videos reached' : 'Choose video file'}
                 </label>
                 <p className="text-sm text-sage-300 mt-2">
-                  MP4 format recommended. Maximum 2 videos, 500MB each.
+                  MP4 format recommended. Maximum 2 videos.
                 </p>
               </div>
             </CardContent>
