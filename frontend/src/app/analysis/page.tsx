@@ -147,9 +147,11 @@ export default function AnalysisPage() {
 
   const seekToTime = (time: number) => {
     if (video1Ref.current && video2Ref.current) {
-      video1Ref.current.currentTime = time;
-      video2Ref.current.currentTime = time;
-      setCurrentTime(time);
+      // Constrain time to the shorter video's duration to prevent out-of-bounds
+      const constrainedTime = Math.min(time, Math.min(video1Data.duration, video2Data.duration));
+      video1Ref.current.currentTime = constrainedTime;
+      video2Ref.current.currentTime = constrainedTime;
+      setCurrentTime(constrainedTime);
     }
   };
 
@@ -194,8 +196,9 @@ export default function AnalysisPage() {
     );
   }
 
+  // Calculate similarity based on the actual comparison results
   const similarityPercent = totalSegments > 0 
-    ? ((1 - differences.length / totalSegments) * 100).toFixed(1)
+    ? Math.max(0, 100 - (differences.length / totalSegments * 100)).toFixed(1)
     : '0';
 
   // Use the longer video's duration for timeline
@@ -341,9 +344,9 @@ export default function AnalysisPage() {
                 {/* Difference visualization bar */}
                 <div className="relative h-8 bg-[#F4F3F3] rounded overflow-hidden">
                   {differences.map((diff, index) => {
-                    const startPercent = (diff.start_sec / video1Data.duration) * 100;
-                    const widthPercent = ((diff.end_sec - diff.start_sec) / video1Data.duration) * 100;
-                    const isFullVideo = diff.start_sec === 0 && diff.end_sec >= video1Data.duration - 1;
+                    const startPercent = (diff.start_sec / maxDuration) * 100;
+                    const widthPercent = ((diff.end_sec - diff.start_sec) / maxDuration) * 100;
+                    const isFullVideo = diff.start_sec === 0 && diff.end_sec >= maxDuration - 1;
                     
                     return (
                       <div
@@ -374,12 +377,12 @@ export default function AnalysisPage() {
                      onClick={(e) => {
                        const rect = e.currentTarget.getBoundingClientRect();
                        const percent = (e.clientX - rect.left) / rect.width;
-                       seekToTime(percent * video1Data.duration);
+                       seekToTime(percent * maxDuration);
                      }}>
                   {/* Progress bar */}
                   <div 
                     className="absolute h-full bg-[#0066FF] rounded-full transition-all duration-100"
-                    style={{ width: `${(currentTime / video1Data.duration) * 100}%` }}
+                    style={{ width: `${(currentTime / maxDuration) * 100}%` }}
                   />
                   
                   {/* Hover indicator */}
@@ -390,15 +393,15 @@ export default function AnalysisPage() {
                   {/* Current time indicator */}
                   <div 
                     className="absolute w-5 h-5 bg-white border-[3px] border-[#0066FF] rounded-full -translate-x-1/2 -translate-y-1/2 top-1/2 shadow-lg transition-all duration-100 z-10 hover:scale-110"
-                    style={{ left: `${(currentTime / video1Data.duration) * 100}%` }}
+                    style={{ left: `${(currentTime / maxDuration) * 100}%` }}
                   />
                 </div>
                 
                 {/* Time labels */}
                 <div className="flex justify-between text-xs text-[#9B9896] select-none">
                   <span>0:00</span>
-                  <span>{formatTime(video1Data.duration / 2)}</span>
-                  <span>{formatTime(video1Data.duration)}</span>
+                  <span>{formatTime(maxDuration / 2)}</span>
+                  <span>{formatTime(maxDuration)}</span>
                 </div>
               </div>
             </div>
