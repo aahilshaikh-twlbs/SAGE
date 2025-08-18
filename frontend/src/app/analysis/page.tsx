@@ -216,8 +216,8 @@ export default function AnalysisPage() {
   // Only count segments that were actually compared (not the 999999.0 ones)
   const actualDifferences = differences.filter(d => d.distance < 999999.0).length;
   const similarityPercent = totalSegments > 0 
-    ? ((totalSegments - actualDifferences) / totalSegments * 100).toFixed(1)
-    : '100';
+    ? ((totalSegments - actualDifferences) / totalSegments * 100).toFixed(2)
+    : '100.00';
 
   // Use the longer video's duration for timeline
   const maxDuration = Math.max(video1Data.duration, video2Data.duration);
