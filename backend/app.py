@@ -359,10 +359,24 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         # Get completed task
         completed_task = tl.embed.task.retrieve(task.id)
         
-        # Calculate duration
+        # Calculate duration from video metadata or segments
         duration = 0
         if completed_task.video_embedding and completed_task.video_embedding.segments:
-            duration = completed_task.video_embedding.segments[-1].end_offset_sec
+            # Get the actual end time of the last segment
+            last_segment = completed_task.video_embedding.segments[-1]
+            duration = last_segment.end_offset_sec
+            
+            # Log segment information for debugging
+            total_segments = len(completed_task.video_embedding.segments)
+            logger.info(f"Video has {total_segments} segments")
+            logger.info(f"First segment: {completed_task.video_embedding.segments[0].start_offset_sec}s - {completed_task.video_embedding.segments[0].end_offset_sec}s")
+            logger.info(f"Last segment: {last_segment.start_offset_sec}s - {last_segment.end_offset_sec}s")
+            logger.info(f"Calculated duration: {duration}s")
+            
+            # Verify segment spacing is correct (should be 2 seconds apart)
+            if total_segments > 1:
+                first_gap = completed_task.video_embedding.segments[1].start_offset_sec - completed_task.video_embedding.segments[0].start_offset_sec
+                logger.info(f"Segment spacing: {first_gap}s (should be 2s)")
         
         # Update embedding storage
         embedding_storage[embedding_id].update({
@@ -543,6 +557,9 @@ async def compare_local_videos(
                 "end_offset_sec": seg.end_offset_sec,
                 "embedding": seg.embeddings_float
             } for seg in embed_data1["embeddings"].segments]
+            logger.info(f"Video1 segments extracted: {len(segments1)}")
+        else:
+            logger.error(f"Video1 has no embeddings or segments! Embeddings object: {embed_data1.get('embeddings')}")
         
         if embed_data2["embeddings"] and embed_data2["embeddings"].segments:
             segments2 = [{
@@ -550,10 +567,35 @@ async def compare_local_videos(
                 "end_offset_sec": seg.end_offset_sec,
                 "embedding": seg.embeddings_float
             } for seg in embed_data2["embeddings"].segments]
+            logger.info(f"Video2 segments extracted: {len(segments2)}")
+        else:
+            logger.error(f"Video2 has no embeddings or segments! Embeddings object: {embed_data2.get('embeddings')}")
+        
+        # Validate segment data integrity
+        if segments1:
+            logger.info(f"Video1 first segment: {segments1[0]}")
+            logger.info(f"Video1 last segment: {segments1[-1]}")
+        if segments2:
+            logger.info(f"Video2 first segment: {segments2[0]}")
+            logger.info(f"Video2 last segment: {segments2[-1]}")
         
         logger.info(f"Comparing {len(segments1)} segments from video1 with {len(segments2)} segments from video2, threshold: {threshold}")
-        logger.info(f"Video1 segments: {[(s['start_offset_sec'], s['end_offset_sec']) for s in segments1]}")
-        logger.info(f"Video2 segments: {[(s['start_offset_sec'], s['end_offset_sec']) for s in segments2]}")
+        
+        # Log first few and last few segments for debugging (don't log all for large videos)
+        if len(segments1) > 0:
+            first_segments1 = segments1[:3]
+            last_segments1 = segments1[-3:] if len(segments1) > 3 else []
+            logger.info(f"Video1 first 3 segments: {[(s['start_offset_sec'], s['end_offset_sec']) for s in first_segments1]}")
+            if last_segments1:
+                logger.info(f"Video1 last 3 segments: {[(s['start_offset_sec'], s['end_offset_sec']) for s in last_segments1]}")
+        
+        if len(segments2) > 0:
+            first_segments2 = segments2[:3]
+            last_segments2 = segments2[-3:] if len(segments2) > 3 else []
+            logger.info(f"Video2 first 3 segments: {[(s['start_offset_sec'], s['end_offset_sec']) for s in first_segments2]}")
+            if last_segments2:
+                logger.info(f"Video2 last 3 segments: {[(s['start_offset_sec'], s['end_offset_sec']) for s in last_segments2]}")
+        
         logger.info(f"Embedding data1 keys: {list(embed_data1.keys())}")
         logger.info(f"Embedding data2 keys: {list(embed_data2.keys())}")
         logger.info(f"Embedding1 has embeddings: {embed_data1.get('embeddings') is not None}")
@@ -566,27 +608,55 @@ async def compare_local_videos(
         
         logger.info(f"Video durations - Video1: {duration1}s, Video2: {duration2}s, Max: {max_duration}s")
         
+        # Validate segment data
+        if len(segments1) == 0:
+            logger.error(f"Video1 has no segments! Duration: {duration1}s")
+        if len(segments2) == 0:
+            logger.error(f"Video2 has no segments! Duration: {duration2}s")
+        
+        # Expected segment count based on duration
+        expected_segments1 = max(1, int(duration1 / 2))  # 2-second segments
+        expected_segments2 = max(1, int(duration2 / 2))
+        logger.info(f"Expected segments - Video1: {expected_segments1}, Video2: {expected_segments2}")
+        logger.info(f"Actual segments - Video1: {len(segments1)}, Video2: {len(segments2)}")
+        
         # Compare segments using actual embedding data
         differing_segments = []
         all_distances = []
         matched_segments = 0
         
-        # Create time-based mapping for segments
-        def get_segment_at_time(segments, time_sec):
-            """Find the segment that contains the given time."""
-            for seg in segments:
-                if seg["start_offset_sec"] <= time_sec <= seg["end_offset_sec"]:
-                    return seg
-            return None
-        
-        # Compare segments at regular intervals based on the shorter video's segments
-        min_segments = min(len(segments1), len(segments2))
-        if min_segments == 0:
-            # One video has no segments - mark entire duration as different
+        # Handle case where one or both videos have no segments
+        if len(segments1) == 0 or len(segments2) == 0:
+            logger.error(f"Cannot compare videos - missing segments! Video1: {len(segments1)}, Video2: {len(segments2)}")
+            
+            # Mark entire duration as different
             differing_segments.append(DifferenceSegment(
                 start_sec=0,
                 end_sec=max_duration,
                 distance=999999.0  # Use large number instead of infinity
+            ))
+            
+            # Return early with error response
+            return ComparisonResponse(
+                filename1=embed_data1["filename"],
+                filename2=embed_data2["filename"],
+                differences=differing_segments,
+                total_segments=0,
+                differing_segments=1,
+                threshold_used=threshold
+            )
+        
+        # Compare segments at regular intervals based on the shorter video's segments
+        min_segments = min(len(segments1), len(segments2))
+        logger.info(f"Will compare {min_segments} segments (minimum of both videos)")
+        
+        if min_segments == 0:
+            # This shouldn't happen now due to the check above, but just in case
+            logger.error("min_segments is 0 despite having segments - this is a bug!")
+            differing_segments.append(DifferenceSegment(
+                start_sec=0,
+                end_sec=max_duration,
+                distance=999999.0
             ))
         else:
             # Compare corresponding segments - this should give us exactly min_segments results

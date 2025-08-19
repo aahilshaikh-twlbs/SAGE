@@ -225,6 +225,10 @@ export default function AnalysisPage() {
 
   // Use the longer video's duration for timeline
   const maxDuration = Math.max(video1Data.duration, video2Data.duration);
+  
+  // For very long videos, don't show individual segment details to avoid UI clutter
+  const isLongVideo = maxDuration > 300; // 5 minutes
+  const showSegmentDetails = !isLongVideo;
 
   return (
     <div className="min-h-screen bg-[#F4F3F3] text-[#1D1C1B]">
@@ -365,24 +369,36 @@ export default function AnalysisPage() {
               <div className="relative space-y-2">
                 {/* Difference visualization bar */}
                 <div className="relative h-8 bg-[#F4F3F3] rounded overflow-hidden border border-[#D3D1CF]">
-                  {differences.map((diff, index) => {
-                    const startPercent = (diff.start_sec / maxDuration) * 100;
-                    const widthPercent = ((diff.end_sec - diff.start_sec) / maxDuration) * 100;
-                    const isFullVideo = diff.start_sec === 0 && diff.end_sec >= maxDuration - 1;
-                    
-                    return (
-                      <div
-                        key={index}
-                        className={`absolute h-full ${getSeverityColor(diff.distance, isFullVideo)} opacity-80 hover:opacity-100 transition-opacity cursor-pointer border border-white/20`}
-                        style={{ 
-                          left: `${startPercent}%`,
-                          width: `${Math.max(1, widthPercent)}%`
-                        }}
-                        title={`Click to jump to ${formatTime(diff.start_sec)} - ${formatTime(diff.end_sec)} (Distance: ${diff.distance.toFixed(3)})`}
-                        onClick={() => seekToTime(diff.start_sec)}
-                      />
-                    );
-                  })}
+                  {showSegmentDetails ? (
+                    // Show individual segments for shorter videos
+                    differences.map((diff, index) => {
+                      const startPercent = (diff.start_sec / maxDuration) * 100;
+                      const widthPercent = ((diff.end_sec - diff.start_sec) / maxDuration) * 100;
+                      const isFullVideo = diff.start_sec === 0 && diff.end_sec >= maxDuration - 1;
+                      
+                      return (
+                        <div
+                          key={index}
+                          className={`absolute h-full ${getSeverityColor(diff.distance, isFullVideo)} opacity-80 hover:opacity-100 transition-opacity cursor-pointer border border-white/20`}
+                          style={{ 
+                            left: `${startPercent}%`,
+                            width: `${Math.max(1, widthPercent)}%`
+                          }}
+                          title={`Click to jump to ${formatTime(diff.start_sec)} - ${formatTime(diff.end_sec)} (Distance: ${diff.distance.toFixed(3)})`}
+                          onClick={() => seekToTime(diff.start_sec)}
+                        />
+                      );
+                    })
+                  ) : (
+                    // For long videos, show a summary indicating overall differences
+                    <div className="flex items-center justify-center h-full text-sm text-[#9B9896]">
+                      {differences.length > 0 ? (
+                        <span>Timeline shows {differences.length} detected differences</span>
+                      ) : (
+                        <span>No differences detected</span>
+                      )}
+                    </div>
+                  )}
                   
                   {/* Grid lines for time reference */}
                   {Array.from({ length: 5 }, (_, i) => (
@@ -453,7 +469,8 @@ export default function AnalysisPage() {
                       <p className="text-[#9B9896] text-center py-8">
                         No significant differences found
                       </p>
-                    ) : (
+                    ) : showSegmentDetails ? (
+                      // Show individual segments for shorter videos
                       differences.map((diff, index) => {
                         const isFullVideo = diff.start_sec === 0 && diff.end_sec >= video1Data?.duration - 1;
                         
@@ -481,6 +498,16 @@ export default function AnalysisPage() {
                           </div>
                         );
                       })
+                    ) : (
+                      // For long videos, show a summary
+                      <div className="text-center py-8">
+                        <p className="text-[#9B9896] mb-2">
+                          {differences.length} differences detected across {formatTime(maxDuration)} duration
+                        </p>
+                        <p className="text-xs text-[#9B9896]">
+                          Individual segments hidden for videos longer than 5 minutes
+                        </p>
+                      </div>
                     )}
                   </div>
 
