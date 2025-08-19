@@ -466,6 +466,8 @@ async def validate_api_key(request: ApiKeyRequest):
 @app.post("/upload-and-generate-embeddings", response_model=VideoUploadResponse)
 async def upload_and_generate_embeddings(file: UploadFile = File(...)):
     """Upload video file and start AI embedding generation."""
+    global processing_video
+    
     logger.info(f"=== UPLOAD REQUEST RECEIVED ===")
     logger.info(f"File: {file.filename}")
     logger.info(f"Content-Type: {file.content_type}")
