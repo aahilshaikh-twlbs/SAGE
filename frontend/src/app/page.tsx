@@ -63,6 +63,9 @@ export default function LandingPage() {
 
   // Poll for video status updates
   useEffect(() => {
+    // Only start polling if we have videos that need polling
+    if (uploadedVideos.length === 0) return;
+    
     const pollStatus = async () => {
       // Get current videos using functional update to avoid stale closure
       setUploadedVideos(currentVideos => {
@@ -159,7 +162,7 @@ export default function LandingPage() {
       clearInterval(interval);
       clearTimeout(initialDelay);
     };
-  }, []); // Empty dependency array to prevent re-creation of polling
+  }, [uploadedVideos.length]); // Only recreate when number of videos changes
 
   const handleKeyValidated = (key: string) => {
     localStorage.setItem('sage_api_key', key);
