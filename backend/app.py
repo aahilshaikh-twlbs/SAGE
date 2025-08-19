@@ -323,6 +323,8 @@ def get_stored_api_key() -> str:
 # Async functions
 async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str):
     """Asynchronously generate embeddings for a video from S3."""
+    global processing_video
+    
     try:
         logger.info(f"Starting async embedding generation for {embedding_id}")
         
@@ -400,7 +402,6 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         logger.info(f"Embedding generation completed for {embedding_id}")
         
         # Process next video in queue if available
-        global processing_video
         if pending_videos:
             next_video = pending_videos.pop(0)
             logger.info(f"Starting processing for next video in queue: {next_video['video_id']}")
@@ -425,7 +426,6 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
             del active_tasks[embedding_id]
         
         # Even on error, try to process next video in queue
-        global processing_video
         if pending_videos:
             next_video = pending_videos.pop(0)
             logger.info(f"Starting processing for next video in queue after error: {next_video['video_id']}")

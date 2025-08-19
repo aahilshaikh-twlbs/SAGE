@@ -236,7 +236,7 @@ export default function LandingPage() {
   };
 
   const cancelVideo = async (video: LocalVideo) => {
-    if (video.video_id && (video.status === 'processing' || video.status === 'uploading')) {
+    if (video.video_id && (video.status === 'processing' || video.status === 'uploading' || video.status === 'queued')) {
       try {
         // Cancel the entire video processing (includes embedding task)
         await api.cancelVideo(video.video_id);
@@ -478,7 +478,7 @@ export default function LandingPage() {
                           size="sm"
                           className="border-sage-200 hover:bg-sage-50 text-sage-400"
                         >
-                          {video.status === 'processing' || video.status === 'uploading' ? (
+                          {video.status === 'processing' || video.status === 'uploading' || video.status === 'queued' ? (
                             <StopCircle className="w-4 h-4" />
                           ) : (
                             <X className="w-4 h-4" />
