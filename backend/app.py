@@ -178,6 +178,10 @@ tl_client = None
 start_time = datetime.now()
 active_tasks: Dict[str, Any] = {}
 
+# Add a queue for pending videos at the top of the file, after the existing storage variables
+pending_videos = []  # Queue for videos waiting to be processed
+processing_video = None  # Currently processing video ID
+
 # Utility functions
 def get_s3_presigned_url(s3_url: str, expiration: int = 3600) -> str:
     """Generate a presigned URL for an S3 object."""
@@ -395,6 +399,22 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         
         logger.info(f"Embedding generation completed for {embedding_id}")
         
+        # Process next video in queue if available
+        global processing_video
+        if pending_videos:
+            next_video = pending_videos.pop(0)
+            logger.info(f"Starting processing for next video in queue: {next_video['video_id']}")
+            processing_video = next_video['video_id']
+            asyncio.create_task(generate_embeddings_async(
+                next_video['embedding_id'], 
+                next_video['s3_url'], 
+                next_video['api_key']
+            ))
+        else:
+            # No more videos to process
+            processing_video = None
+            logger.info("No more videos in queue, processing complete")
+        
     except Exception as e:
         logger.error(f"Error in async embedding generation for {embedding_id}: {e}")
         embedding_storage[embedding_id]["status"] = "failed"
@@ -403,6 +423,21 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         # Remove from active tasks
         if embedding_id in active_tasks:
             del active_tasks[embedding_id]
+        
+        # Even on error, try to process next video in queue
+        global processing_video
+        if pending_videos:
+            next_video = pending_videos.pop(0)
+            logger.info(f"Starting processing for next video in queue after error: {next_video['video_id']}")
+            processing_video = next_video['video_id']
+            asyncio.create_task(generate_embeddings_async(
+                next_video['embedding_id'], 
+                next_video['s3_url'], 
+                next_video['api_key']
+            ))
+        else:
+            processing_video = None
+            logger.info("No more videos in queue after error, processing complete")
 
 # API endpoints
 @app.post("/validate-key", response_model=ApiKeyResponse)
@@ -476,19 +511,31 @@ async def upload_and_generate_embeddings(file: UploadFile = File(...)):
         
         logger.info("Video and embedding data stored in memory")
 
-        # Start async embedding generation
-        logger.info("Starting async embedding generation...")
-        asyncio.create_task(generate_embeddings_async(embedding_id, s3_url, api_key))
+        # Check if we can start processing immediately or need to queue
+        if processing_video is None:
+            # No video currently processing, start immediately
+            logger.info("Starting embedding generation immediately...")
+            processing_video = video_id
+            asyncio.create_task(generate_embeddings_async(embedding_id, s3_url, api_key))
+        else:
+            # Another video is processing, add to queue
+            logger.info(f"Video {video_id} queued, waiting for {processing_video} to complete")
+            pending_videos.append({
+                "video_id": video_id,
+                "embedding_id": embedding_id,
+                "s3_url": s3_url,
+                "api_key": api_key
+            })
         
         logger.info(f"=== UPLOAD COMPLETED SUCCESSFULLY ===")
-        logger.info(f"File {file.filename} uploaded to S3 and embedding generation started")
+        logger.info(f"File {file.filename} uploaded to S3 and {'embedding generation started' if processing_video == video_id else 'queued for processing'}")
         
         return VideoUploadResponse(
-            message="Video uploaded successfully. Embedding generation in progress.",
+            message="Video uploaded successfully. Embedding generation in progress." if processing_video == video_id else "Video uploaded successfully. Waiting for previous video to complete.",
             filename=file.filename,
             video_id=video_id,
             embedding_id=embedding_id,
-            status="processing"
+            status="processing" if processing_video == video_id else "queued"
         )
         
     except Exception as e:

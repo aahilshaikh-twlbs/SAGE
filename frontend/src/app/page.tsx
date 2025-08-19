@@ -14,7 +14,7 @@ interface LocalVideo {
   thumbnail: string;
   video_id?: string;
   embedding_id?: string;
-  status: 'uploading' | 'processing' | 'ready' | 'error' | 'cancelled' | 'uploaded';
+  status: 'uploading' | 'processing' | 'ready' | 'error' | 'cancelled' | 'uploaded' | 'queued';
   error?: string;
   duration?: number;
   progress?: string;
@@ -68,66 +68,72 @@ export default function LandingPage() {
       setUploadedVideos(currentVideos => {
         // Don't poll if no videos or no videos need polling
         const needsPolling = currentVideos.some(v => 
-          v.video_id && (v.status === 'processing' || v.status === 'uploading' || v.status === 'uploaded')
+          v.video_id && (v.status === 'processing' || v.status === 'uploading' || v.status === 'uploaded' || v.status === 'queued')
         );
         
         if (currentVideos.length === 0 || !needsPolling) return currentVideos;
         
-                 // Process each video that needs polling
-         for (let i = 0; i < currentVideos.length; i++) {
-           const video = currentVideos[i];
-           if (video.video_id && (video.status === 'processing' || video.status === 'uploading' || video.status === 'uploaded')) {
-             try {
-               // Use a separate async function to handle the API call
-               (async () => {
-                 try {
-                   const status = await api.getVideoStatus(video.video_id!);
-                   
-                   // Determine the current stage based on status
-                   let newStatus: LocalVideo['status'] = video.status;
-                   let progress = video.progress;
-                   
-                   if (status.status === 'ready') {
-                     newStatus = 'ready';
-                     progress = 'Completed';
-                   } else if (status.embedding_status === 'processing') {
-                     newStatus = 'processing';
-                     progress = 'Generating embeddings...';
-                   } else if (status.embedding_status === 'pending') {
-                     newStatus = 'processing';
-                     progress = 'Preparing embedding task...';
-                   } else if (status.embedding_status === 'failed') {
-                     newStatus = 'error';
-                     progress = 'Embedding generation failed';
-                   } else if (status.embedding_status === 'cancelled') {
-                     newStatus = 'cancelled';
-                     progress = 'Cancelled';
-                   } else if (status.status === 'uploaded' && status.embedding_status === 'pending') {
-                     newStatus = 'processing';
-                     progress = 'Starting embedding generation...';
-                   }
-                   
-                   // Update the video if there are changes
-                   if (newStatus !== video.status || progress !== video.progress || status.duration !== video.duration) {
-                     setUploadedVideos(prevVideos => 
-                       prevVideos.map(v => 
-                         v.id === video.id 
-                           ? { ...v, status: newStatus, progress, duration: status.duration }
-                           : v
-                       )
-                     );
-                   }
-                 } catch (error) {
-                   console.error('Error checking video status:', error);
-                 }
-               })();
-             } catch (error) {
-               console.error('Error in polling loop:', error);
-             }
-           }
-         }
+        // Process each video that needs polling
+        for (let i = 0; i < currentVideos.length; i++) {
+          const video = currentVideos[i];
+          if (video.video_id && (video.status === 'processing' || video.status === 'uploading' || video.status === 'uploaded' || video.status === 'queued')) {
+            try {
+              // Use a separate async function to handle the API call
+              (async () => {
+                try {
+                  const status = await api.getVideoStatus(video.video_id!);
+                  
+                  // Determine the current stage based on status
+                  let newStatus: LocalVideo['status'] = video.status;
+                  let progress = video.progress;
+                  
+                  if (status.status === 'ready') {
+                    newStatus = 'ready';
+                    progress = 'Completed';
+                  } else if (status.embedding_status === 'processing') {
+                    newStatus = 'processing';
+                    progress = 'Generating embeddings...';
+                  } else if (status.embedding_status === 'pending') {
+                    // Check if this video was queued and is now starting processing
+                    if (video.status === 'queued') {
+                      newStatus = 'processing';
+                      progress = 'Starting embedding generation...';
+                    } else {
+                      newStatus = 'processing';
+                      progress = 'Preparing embedding task...';
+                    }
+                  } else if (status.embedding_status === 'failed') {
+                    newStatus = 'error';
+                    progress = 'Embedding generation failed';
+                  } else if (status.embedding_status === 'cancelled') {
+                    newStatus = 'cancelled';
+                    progress = 'Cancelled';
+                  } else if (status.status === 'uploaded' && status.embedding_status === 'pending') {
+                    newStatus = 'processing';
+                    progress = 'Starting embedding generation...';
+                  }
+                  
+                  // Update the video if there are changes
+                  if (newStatus !== video.status || progress !== video.progress || status.duration !== video.duration) {
+                    setUploadedVideos(prevVideos => 
+                      prevVideos.map(v => 
+                        v.id === video.id 
+                          ? { ...v, status: newStatus, progress, duration: status.duration }
+                          : v
+                      )
+                    );
+                  }
+                } catch (error) {
+                  console.error('Error checking video status:', error);
+                }
+              })();
+            } catch (error) {
+              console.error('Error in polling loop:', error);
+            }
+          }
+        }
 
-         return currentVideos;
+        return currentVideos;
       });
     };
 
@@ -195,10 +201,10 @@ export default function LandingPage() {
         video.id === newVideo.id 
           ? { 
               ...video, 
-              status: 'processing', 
+              status: result.status === 'queued' ? 'queued' : 'processing', 
               video_id: result.video_id, 
               embedding_id: result.embedding_id,
-              progress: 'Starting embedding generation...'
+              progress: result.status === 'queued' ? 'Waiting for previous video to complete...' : 'Starting embedding generation...'
             }
           : video
       ));
@@ -280,14 +286,21 @@ export default function LandingPage() {
         return (
           <div className="flex items-center gap-2 text-sage-500">
             <Loader2 className="w-4 h-4 animate-spin" />
-            <span>{video.progress || 'Uploading...'}</span>
+            <span>{video.progress || 'Uploading to S3...'}</span>
           </div>
         );
       case 'processing':
         return (
           <div className="flex items-center gap-2 text-sage-500">
             <Loader2 className="w-4 h-4 animate-spin" />
-            <span>{video.progress || 'Processing...'}</span>
+            <span>{video.progress || 'Generating embeddings...'}</span>
+          </div>
+        );
+      case 'queued':
+        return (
+          <div className="flex items-center gap-2 text-sage-400">
+            <Loader2 className="w-4 h-4 animate-pulse" />
+            <span>{video.progress || 'Waiting for previous video to complete...'}</span>
           </div>
         );
       case 'ready':
