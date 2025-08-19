@@ -98,6 +98,10 @@ export default function LandingPage() {
                     if (video.status === 'queued') {
                       newStatus = 'processing';
                       progress = 'Starting embedding generation...';
+                    } else if (video.status === 'uploading') {
+                      // Don't change status if still uploading - let the upload response handle it
+                      newStatus = video.status;
+                      progress = video.progress;
                     } else {
                       newStatus = 'processing';
                       progress = 'Preparing embedding task...';
@@ -113,8 +117,15 @@ export default function LandingPage() {
                     progress = 'Starting embedding generation...';
                   }
                   
-                  // Update the video if there are changes
+                  // Only update if there are meaningful changes and not overriding upload status
                   if (newStatus !== video.status || progress !== video.progress || status.duration !== video.duration) {
+                    // Don't override 'queued' status with 'uploading' status
+                    if (video.status === 'queued' && newStatus === 'uploading') {
+                      console.log('Preventing status override from queued to uploading for video:', video.id);
+                      return;
+                    }
+                    
+                    console.log('Updating video status from', video.status, 'to', newStatus, 'with progress:', progress);
                     setUploadedVideos(prevVideos => 
                       prevVideos.map(v => 
                         v.id === video.id 
@@ -138,7 +149,16 @@ export default function LandingPage() {
     };
 
     const interval = setInterval(pollStatus, 3000); // Poll every 3 seconds for more responsive updates
-    return () => clearInterval(interval);
+    
+    // Add a small delay before starting polling to ensure initial status updates are processed
+    const initialDelay = setTimeout(() => {
+      // Start polling after initial delay
+    }, 1000);
+    
+    return () => {
+      clearInterval(interval);
+      clearTimeout(initialDelay);
+    };
   }, []); // Empty dependency array to prevent re-creation of polling
 
   const handleKeyValidated = (key: string) => {
@@ -197,6 +217,9 @@ export default function LandingPage() {
     try {
       const result = await api.uploadVideo(file);
       
+      console.log('Upload response:', result);
+      console.log('Video status:', result.status);
+      
       setUploadedVideos(prev => prev.map(video => 
         video.id === newVideo.id 
           ? { 
@@ -208,6 +231,9 @@ export default function LandingPage() {
             }
           : video
       ));
+      
+      console.log('Updated video status to:', result.status === 'queued' ? 'queued' : 'processing');
+      console.log('Updated video progress to:', result.status === 'queued' ? 'Waiting for previous video to complete...' : 'Starting embedding generation...');
       
     } catch (error) {
       console.error('Upload failed:', error);
