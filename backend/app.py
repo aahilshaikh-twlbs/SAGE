@@ -341,11 +341,24 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         
         # Create embedding task using presigned HTTPS URL
         logger.info(f"Creating embedding task for {embedding_id}")
+        
+        # Optimize parameters for long videos
+        # For movies and long content, keep 2-second segments for maximum detail
+        # but optimize other parameters for better long video handling
+        filename = embedding_storage[embedding_id].get("filename", "")
+        if filename and any(keyword in filename.lower() for keyword in ['movie', 'film', 'episode', 'full']):
+            clip_length = 2  # Keep 2-second segments for maximum detail in movies
+            embedding_scopes = ["clip", "video"]  # Full scope for detailed movie analysis
+            logger.info(f"Movie detected ({filename}), using {clip_length}s segments for maximum detail")
+        else:
+            clip_length = 2  # Default 2-second segments
+            embedding_scopes = ["clip", "video"]  # Full scope for shorter videos
+        
         task = tl.embed.task.create(
             model_name="Marengo-retrieval-2.7",
             video_url=presigned_url,
-            video_clip_length=2,
-            video_embedding_scopes=["clip", "video"]
+            video_clip_length=clip_length,
+            video_embedding_scopes=embedding_scopes
         )
         
         # Store task for potential cancellation
@@ -360,6 +373,17 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         # Add timeout for very long videos (over 15 minutes)
         # TwelveLabs might have issues with extremely long videos
         timeout_seconds = 1800  # 30 minutes default
+        
+        # Progressive timeout strategy for very long videos
+        # Estimate duration from filename or use progressive timeouts
+        filename = embedding_storage[embedding_id].get("filename", "")
+        if any(keyword in filename.lower() for keyword in ['movie', 'film', 'episode', 'full', 'complete']):
+            timeout_seconds = 3600  # 1 hour for movies
+            logger.info(f"Movie detected, extending timeout to {timeout_seconds}s")
+        elif any(keyword in filename.lower() for keyword in ['long', 'extended', 'director']):
+            timeout_seconds = 2700  # 45 minutes for long content
+            logger.info(f"Long content detected, extending timeout to {timeout_seconds}s")
+        
         logger.info(f"Starting to wait for task {task.id} completion with timeout: {timeout_seconds}s")
         
         # Use the original task.wait_for_done() but with proper error handling
@@ -388,7 +412,40 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
                         break
                     elif current_task.status == "failed":
                         logger.error(f"Task {task.id} failed with status: failed")
-                        raise Exception(f"Task {task.id} failed with status: failed")
+                        
+                        # Try to get more error details
+                        try:
+                            error_details = getattr(current_task, 'error', 'No error details')
+                            logger.error(f"Task {task.id} error details: {error_details}")
+                        except:
+                            pass
+                        
+                        # For long videos, sometimes a retry helps
+                        if timeout_seconds > 900:  # Only retry for videos longer than 15 minutes
+                            logger.info(f"Attempting retry for long video task {task.id}")
+                            try:
+                                # Create a new task with the same parameters
+                                retry_task = tl.embed.task.create(
+                                    model_name="Marengo-retrieval-2.7",
+                                    video_url=presigned_url,
+                                    video_clip_length=clip_length,
+                                    video_embedding_scopes=embedding_scopes
+                                )
+                                logger.info(f"Retry task {retry_task.id} created for {embedding_id}")
+                                
+                                # Wait for retry task with shorter timeout
+                                retry_task.wait_for_done(sleep_interval=5, timeout=600)  # 10 minutes for retry
+                                logger.info(f"Retry task {retry_task.id} completed successfully")
+                                
+                                # Use the retry task instead
+                                task = retry_task
+                                break
+                                
+                            except Exception as retry_error:
+                                logger.error(f"Retry task also failed: {retry_error}")
+                                raise Exception(f"Task {task.id} failed and retry also failed: {retry_error}")
+                        else:
+                            raise Exception(f"Task {task.id} failed with status: failed")
                     elif current_task.status == "processing":
                         # Task is still processing, wait longer between checks
                         await asyncio.sleep(30)  # Wait 30 seconds between API calls
