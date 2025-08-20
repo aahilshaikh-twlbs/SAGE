@@ -2,91 +2,58 @@
 
 A modern, AI-powered video comparison application that leverages TwelveLabs AI embeddings to analyze and compare video content at the segment level.
 
-## 🚀 Features
+## ⚠️ CRITICAL: Large Video Handling
 
-- **AI-Powered Video Analysis** - Uses TwelveLabs Marengo-retrieval-2.7 model
-- **Real-Time Video Processing** - Asynchronous embedding generation with progress tracking
+**IMPORTANT**: For videos longer than 10 minutes, please read the [Large Video Handling Guide](docs/LARGE_VIDEO_HANDLING.md) before use. These fixes are essential for reliable operation with longer videos.
+
+- **Videos 1-10 minutes**: Work out of the box
+- **Videos 10+ minutes**: Require the implemented fixes for proper operation
+- **Videos 15+ minutes**: Critical fixes prevent silent failures and incorrect results
+
+## 📚 **Documentation**
+
+- **[User Guide](docs/USER_GUIDE.md)** - Complete user documentation, setup, and usage
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)** - Technical implementation and architecture
+- **[Large Video Handling](docs/LARGE_VIDEO_HANDLING.md)** - Critical fixes for videos >10 minutes
+- **[Upload Process](docs/UPLOAD_PROCESS.md)** - Detailed upload implementation details
+
+## 🚀 **Features**
+
+- **AI-Powered Video Analysis** - TwelveLabs Marengo-retrieval-2.7 model
+- **Real-Time Processing** - Asynchronous embedding generation with progress tracking
 - **Segment-Level Comparison** - Identifies differences at precise timestamps
-- **Synchronized Video Playback** - Side-by-side video comparison with timeline markers
+- **Synchronized Playback** - Side-by-side video comparison with timeline markers
 - **Drag & Drop Interface** - Modern upload experience with video thumbnails
 - **Configurable Thresholds** - Adjustable sensitivity for difference detection
-- **Visual Timeline** - Color-coded difference markers on synchronized video timeline
+- **Visual Timeline** - Color-coded difference markers on synchronized timeline
 
-## 🏗️ Architecture
+*For detailed feature information, see the [User Guide](docs/USER_GUIDE.md).*
 
-- **Frontend**: Next.js 15 with React 19, TypeScript, and Tailwind CSS
-- **Backend**: FastAPI with Python 3.12+
-- **AI Service**: TwelveLabs API integration
-- **Database**: SQLite for API key storage
-- **Storage**: In-memory for videos and embeddings
+## 🚀 **Quick Start**
 
-## 📦 Installation
-
-### Prerequisites
-
+### **Prerequisites**
 - Python 3.12+
-- Node.js 18+
+- Node.js 18+ or Bun
 - TwelveLabs API key
 - Git
 
-### Backend Setup
-
+### **Basic Setup**
 ```bash
-cd SAGE_new/backend
-
-# Install dependencies
+# Backend
+cd SAGE/backend
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-# Set environment variables
-export TWELVELABS_API_KEY="your_api_key"
-
-# Run backend
+export TWELVELABS_API_KEY="your_key"
 python app.py
+
+# Frontend (new terminal)
+cd SAGE/frontend
+bun install  # or npm install
+bun dev      # or npm run dev
 ```
 
-The backend will be available at `http://localhost:8000`
-
-### Frontend Setup
-
-```bash
-cd SAGE_new/frontend
-
-# Install dependencies
-npm install
-
-# Set environment variables (optional)
-export NEXT_PUBLIC_API_URL="http://localhost:8000"
-
-# Run development server
-npm run dev
-```
-
-The frontend will be available at `http://localhost:3000`
-
-## 🔑 Configuration
-
-1. **Get TwelveLabs API Key**: Sign up at [twelvelabs.io](https://twelvelabs.io/)
-2. **Set Environment Variable**: `export TWELVELABS_API_KEY="your_key"`
-3. **Start Backend**: Run `python app.py` in the backend directory
-4. **Start Frontend**: Run `npm run dev` in the frontend directory
-5. **Configure API Key**: Enter your API key in the SAGE interface
-
-## 📱 Usage
-
-### 1. Upload Videos
-- Navigate to the main page
-- Upload up to 2 video files (MP4 recommended)
-- Wait for AI processing to complete
-
-### 2. Start Comparison
-- Click "Start Comparison" when both videos are ready
-- Navigate to the analysis page
-
-### 3. Analyze Differences
-- Use synchronized video players for side-by-side comparison
-- Adjust similarity threshold for different sensitivity levels
-- Click on timeline markers to jump to specific differences
-- View detailed difference statistics in the right panel
+*For complete setup instructions, see the [User Guide](docs/USER_GUIDE.md).*
 
 ## 🎨 UI Components
 
@@ -133,6 +100,30 @@ The analysis page features:
 - 2-video comparison limit
 - Mock embedding data for demonstration
 
+## 🔧 Recent Critical Fixes
+
+### Large Video Handling (August 2024)
+**CRITICAL FIXES** have been implemented to handle videos longer than 10 minutes reliably:
+
+- **Fixed embedding generation failures** for videos >15 minutes
+- **Eliminated silent failures** that produced incorrect comparison results
+- **Added comprehensive validation** for segment generation and coverage
+- **Implemented proper error handling** with clear failure messages
+- **Fixed Python scoping issues** that prevented upload completion
+
+**📖 For complete details, see: [Large Video Handling Guide](docs/LARGE_VIDEO_HANDLING.md)**
+
+### What Was Fixed
+- Videos 18-19 minutes: Previously failing, now working correctly
+- Videos 26-29 minutes: Previously failing, now working correctly  
+- Videos 8 minutes: Continue working as before
+- All video lengths: Now provide clear success/failure feedback
+
+### Impact
+- **Before**: Silent failures, incorrect results, confusing behavior
+- **After**: Reliable operation or clear error messages
+- **Coverage**: Videos up to 2 hours (TwelveLabs limit) now supported
+
 ## 🔮 Future Enhancements
 
 - Persistent storage with PostgreSQL
@@ -160,6 +151,36 @@ The analysis page features:
    - Adjust similarity threshold
    - Check video quality and duration
    - Verify embedding generation completed
+
+4. **Large Video Issues (>10 minutes)**
+   - **CRITICAL**: Read [Large Video Handling Guide](docs/LARGE_VIDEO_HANDLING.md)
+   - Check backend logs for embedding generation errors
+   - Verify video format compatibility
+   - Monitor processing time (can take 15-30 minutes for very long videos)
+
+### For Large Videos (10+ minutes)
+If you're experiencing issues with videos longer than 10 minutes:
+
+1. **Check the logs** for detailed error messages
+2. **Verify embedding generation** completed successfully
+3. **Check segment count** vs expected count
+4. **Review the [Large Video Handling Guide](docs/LARGE_VIDEO_HANDLING.md)** for detailed troubleshooting
+
+**Note**: The system now provides clear error messages instead of silent failures. If a large video fails, you'll get a specific error explaining what went wrong.
+
+### **For Complete Troubleshooting**
+See the [User Guide](docs/USER_GUIDE.md#-troubleshooting) for comprehensive troubleshooting information and the [Developer Guide](docs/DEVELOPER_GUIDE.md) for technical debugging.
+
+## 📚 **Documentation Structure**
+
+The SAGE documentation has been consolidated for better organization:
+
+- **[User Guide](docs/USER_GUIDE.md)** - Complete user documentation (consolidated from QUICK_REFERENCE + SAGE_DOCUMENTATION)
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)** - Technical implementation (consolidated from ARCHITECTURE + TECHNICAL_SPECIFICATION)
+- **[Large Video Handling](docs/LARGE_VIDEO_HANDLING.md)** - Critical fixes for large videos (specialized)
+- **[Upload Process](docs/UPLOAD_PROCESS.md)** - Detailed upload implementation (specialized)
+
+*This consolidation eliminates redundancy while preserving all essential information.*
 
 ## 📄 License
 
