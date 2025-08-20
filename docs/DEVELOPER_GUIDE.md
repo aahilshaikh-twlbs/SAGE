@@ -93,6 +93,7 @@ Next.js 15.4.5 (App Router)
 - **Storage**: In-memory for videos/embeddings, SQLite for API keys
 - **API Proxy**: Next.js rewrites to avoid CORS issues
 - **Domain**: Custom domain with SSL certificates
+- **Video Limits**: Maximum 20 minutes per video (TwelveLabs API limitation)
 
 ## 🔧 **Core Technical Concepts**
 
@@ -382,6 +383,7 @@ interface ComparisonState {
 - **Resource Monitoring**: CPU, memory, and network usage
 - **Error Tracking**: Comprehensive error logging and alerting
 - **User Analytics**: Usage patterns and performance metrics
+- **Video Duration Limits**: Monitor for videos approaching 20-minute limit
 
 ## 🔧 **Development & Testing**
 

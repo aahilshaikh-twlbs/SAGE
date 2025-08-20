@@ -36,6 +36,7 @@ bun dev      # or npm run dev
 - **Videos 1-10 minutes**: Work out of the box
 - **Videos 10+ minutes**: Require the implemented fixes for proper operation
 - **Videos 15+ minutes**: Critical fixes prevent silent failures and incorrect results
+- **Maximum supported duration: 20 minutes** (TwelveLabs API limitation)
 
 ## 🎯 **Key Features**
 
@@ -312,6 +313,7 @@ curl "http://localhost:8000/video-status/{video_id}"
 - Single server deployment
 - 2-video comparison limit
 - Sequential video processing (one at a time)
+- **Maximum video duration: 20 minutes** (TwelveLabs API limitation)
 
 ## 🔮 **Future Enhancements**
 

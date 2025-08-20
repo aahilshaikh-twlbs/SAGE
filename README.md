@@ -9,6 +9,7 @@ A modern, AI-powered video comparison application that leverages TwelveLabs AI e
 - **Videos 1-10 minutes**: Work out of the box
 - **Videos 10+ minutes**: Require the implemented fixes for proper operation
 - **Videos 15+ minutes**: Critical fixes prevent silent failures and incorrect results
+- **Maximum supported duration: 20 minutes** (TwelveLabs API limitation)
 
 ## 📚 **Documentation**
 
@@ -98,6 +99,8 @@ The analysis page features:
 - In-memory storage (videos lost on server restart)
 - Single server deployment
 - 2-video comparison limit
+- Sequential video processing (one at a time)
+- **Maximum video duration: 20 minutes** (TwelveLabs API limitation)
 - Mock embedding data for demonstration
 
 ## 🔧 Recent Critical Fixes
@@ -122,7 +125,7 @@ The analysis page features:
 ### Impact
 - **Before**: Silent failures, incorrect results, confusing behavior
 - **After**: Reliable operation or clear error messages
-- **Coverage**: Videos up to 2 hours (TwelveLabs limit) now supported
+- **Coverage**: Videos up to 20 minutes (TwelveLabs API limit) now supported
 
 ## 🔮 Future Enhancements
 

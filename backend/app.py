@@ -16,7 +16,6 @@ from botocore.exceptions import ClientError
 import uuid
 import asyncio
 import pytz
-import time
 
 # Configure logging with PST timezone
 pst = pytz.timezone('US/Pacific')
@@ -341,24 +340,11 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         
         # Create embedding task using presigned HTTPS URL
         logger.info(f"Creating embedding task for {embedding_id}")
-        
-        # Optimize parameters for long videos
-        # For movies and long content, keep 2-second segments for maximum detail
-        # but optimize other parameters for better long video handling
-        filename = embedding_storage[embedding_id].get("filename", "")
-        if filename and any(keyword in filename.lower() for keyword in ['movie', 'film', 'episode', 'full']):
-            clip_length = 2  # Keep 2-second segments for maximum detail in movies
-            embedding_scopes = ["clip", "video"]  # Full scope for detailed movie analysis
-            logger.info(f"Movie detected ({filename}), using {clip_length}s segments for maximum detail")
-        else:
-            clip_length = 2  # Default 2-second segments
-            embedding_scopes = ["clip", "video"]  # Full scope for shorter videos
-        
         task = tl.embed.task.create(
             model_name="Marengo-retrieval-2.7",
             video_url=presigned_url,
-            video_clip_length=clip_length,
-            video_embedding_scopes=embedding_scopes
+            video_clip_length=2,
+            video_embedding_scopes=["clip", "video"]
         )
         
         # Store task for potential cancellation
@@ -373,114 +359,14 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         # Add timeout for very long videos (over 15 minutes)
         # TwelveLabs might have issues with extremely long videos
         timeout_seconds = 1800  # 30 minutes default
-        
-        # Progressive timeout strategy for very long videos
-        # Estimate duration from filename or use progressive timeouts
-        filename = embedding_storage[embedding_id].get("filename", "")
-        if any(keyword in filename.lower() for keyword in ['movie', 'film', 'episode', 'full', 'complete']):
-            timeout_seconds = 3600  # 1 hour for movies
-            logger.info(f"Movie detected, extending timeout to {timeout_seconds}s")
-        elif any(keyword in filename.lower() for keyword in ['long', 'extended', 'director']):
-            timeout_seconds = 2700  # 45 minutes for long content
-            logger.info(f"Long content detected, extending timeout to {timeout_seconds}s")
-        
         logger.info(f"Starting to wait for task {task.id} completion with timeout: {timeout_seconds}s")
         
-        # Use the original task.wait_for_done() but with proper error handling
         try:
             task.wait_for_done(sleep_interval=5, callback=on_task_update, timeout=timeout_seconds)
-            logger.info(f"Task {task.id} completed successfully via wait_for_done")
+            logger.info(f"Task {task.id} completed, retrieving results...")
         except Exception as e:
-            logger.warning(f"wait_for_done failed: {e}, falling back to manual polling")
-            
-            # Fallback to manual polling if wait_for_done fails
-            start_time = time.time()
-            while True:
-                # Check if we've exceeded timeout
-                if time.time() - start_time > timeout_seconds:
-                    logger.error(f"Task {task.id} timed out after {timeout_seconds}s")
-                    raise Exception(f"Embedding task timed out after {timeout_seconds}s")
-                
-                # Get current task status (but don't do this every 5 seconds)
-                try:
-                    current_task = tl.embed.task.retrieve(task.id)
-                    logger.info(f"Task {task.id} status: {current_task.status}")
-                    
-                    # Check if task is complete
-                    if current_task.status == "ready":
-                        logger.info(f"Task {task.id} completed successfully via manual polling")
-                        break
-                    elif current_task.status == "failed":
-                        logger.error(f"Task {task.id} failed with status: failed")
-                        
-                        # Try to get more error details
-                        try:
-                            error_details = getattr(current_task, 'error', 'No error details')
-                            logger.error(f"Task {task.id} error details: {error_details}")
-                        except:
-                            pass
-                        
-                        # For long videos, sometimes a retry helps
-                        if timeout_seconds > 600:  # Retry for videos longer than 10 minutes
-                            logger.info(f"Attempting retry for video task {task.id}")
-                            try:
-                                # Create a new task with the same parameters
-                                retry_task = tl.embed.task.create(
-                                    model_name="Marengo-retrieval-2.7",
-                                    video_url=presigned_url,
-                                    video_clip_length=clip_length,
-                                    video_embedding_scopes=embedding_scopes
-                                )
-                                logger.info(f"Retry task {retry_task.id} created for {embedding_id}")
-                                
-                                # Wait for retry task with shorter timeout
-                                retry_task.wait_for_done(sleep_interval=5, timeout=600)  # 10 minutes for retry
-                                logger.info(f"Retry task {retry_task.id} completed successfully")
-                                
-                                # Use the retry task instead
-                                task = retry_task
-                                break
-                                
-                            except Exception as retry_error:
-                                logger.error(f"Retry task also failed: {retry_error}")
-                                raise Exception(f"Task {task.id} failed and retry also failed: {retry_error}")
-                        else:
-                            # Even for shorter videos, try one retry
-                            logger.info(f"Attempting single retry for video task {task.id}")
-                            try:
-                                retry_task = tl.embed.task.create(
-                                    model_name="Marengo-retrieval-2.7",
-                                    video_url=presigned_url,
-                                    video_clip_length=clip_length,
-                                    video_embedding_scopes=embedding_scopes
-                                )
-                                logger.info(f"Retry task {retry_task.id} created for {embedding_id}")
-                                
-                                # Wait for retry task with shorter timeout
-                                retry_task.wait_for_done(sleep_interval=5, timeout=300)  # 5 minutes for retry
-                                logger.info(f"Retry task {retry_task.id} completed successfully")
-                                
-                                # Use the retry task instead
-                                task = retry_task
-                                break
-                                
-                            except Exception as retry_error:
-                                logger.error(f"Retry task also failed: {retry_error}")
-                                raise Exception(f"Task {task.id} failed and retry also failed: {retry_error}")
-                    elif current_task.status == "processing":
-                        # Task is still processing, wait longer between checks
-                        await asyncio.sleep(30)  # Wait 30 seconds between API calls
-                    else:
-                        # Unknown status, log and continue
-                        logger.warning(f"Task {task.id} has unknown status: {current_task.status}")
-                        await asyncio.sleep(30)
-                        
-                except Exception as poll_error:
-                    logger.warning(f"Error polling task {task.id}: {poll_error}")
-                    # Wait longer on error to avoid overwhelming the API
-                    await asyncio.sleep(60)
-        
-        logger.info(f"Task {task.id} completed, retrieving results...")
+            logger.error(f"Task {task.id} timed out or failed during wait: {e}")
+            raise Exception(f"Embedding task timed out after {timeout_seconds}s")
         
         # Remove from active tasks
         if embedding_id in active_tasks:

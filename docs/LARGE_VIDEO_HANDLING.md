@@ -21,6 +21,7 @@ This document details critical fixes implemented to handle large video files (10
 - **15+ minutes**: Major issues, now fully addressed
 - **18-19 minutes**: Previously failing, now working
 - **26-29 minutes**: Previously failing, now working
+- **Maximum supported: 20 minutes** (TwelveLabs API limitation)
 
 ## Technical Fixes Implemented
 
@@ -303,7 +304,7 @@ These fixes are critical for the reliable operation of SAGE with large video fil
 
 - **Reliable Processing**: Proper error handling and validation
 - **Clear Feedback**: No more silent failures or confusing results
-- **Scalable Architecture**: Handles videos up to 2 hours (TwelveLabs limit)
+- **Scalable Architecture**: Handles videos up to 20 minutes (TwelveLabs API limit)
 - **Debugging Support**: Comprehensive logging and error messages
 
-**Remember**: Always test with videos of various lengths to ensure system stability. The fixes are designed to fail fast with clear error messages rather than produce incorrect results.
+**Remember**: Always test with videos of various lengths to ensure system stability. The fixes are designed to fail fast with clear error messages rather than produce incorrect results. **Note: Videos longer than 20 minutes are not supported due to TwelveLabs API limitations.**
