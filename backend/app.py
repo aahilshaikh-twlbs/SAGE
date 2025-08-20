@@ -16,6 +16,7 @@ from botocore.exceptions import ClientError
 import uuid
 import asyncio
 import pytz
+import openai
 
 # Configure logging with PST timezone
 pst = pytz.timezone('US/Pacific')
@@ -82,6 +83,18 @@ class HealthResponse(BaseModel):
 
 class CancelTaskRequest(BaseModel):
     embedding_id: str
+
+class OpenAIAnalysisRequest(BaseModel):
+    embedding_id1: str
+    embedding_id2: str
+    differences: List[DifferenceSegment]
+    threshold: float
+    video_duration: float
+
+class OpenAIAnalysisResponse(BaseModel):
+    analysis: str
+    key_insights: List[str]
+    time_segments: List[str]
 
 # FastAPI app
 app = FastAPI(title="SAGE Backend", version="2.0.0")
@@ -630,6 +643,89 @@ async def cancel_embedding_task(request: CancelTaskRequest):
     except Exception as e:
         logger.error(f"Error cancelling task for {embedding_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to cancel task: {str(e)}")
+
+@app.post("/openai-analysis", response_model=OpenAIAnalysisResponse)
+async def generate_openai_analysis(request: OpenAIAnalysisRequest):
+    """Generate AI-powered analysis of video differences using OpenAI."""
+    try:
+        # Get OpenAI API key from environment
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise HTTPException(status_code=500, detail="OpenAI API key not configured")
+        
+        # Configure OpenAI client
+        openai.api_key = openai_api_key
+        
+        # Get video information
+        embed_data1 = embedding_storage.get(request.embedding_id1)
+        embed_data2 = embedding_storage.get(request.embedding_id2)
+        
+        if not embed_data1 or not embed_data2:
+            raise HTTPException(status_code=404, detail="Embedding data not found")
+        
+        # Prepare analysis prompt
+        prompt = f"""
+        Analyze the differences between two videos based on the following data:
+        
+        Video 1: {embed_data1.get('filename', 'Unknown')}
+        Video 2: {embed_data2.get('filename', 'Unknown')}
+        Total Duration: {request.video_duration:.1f} seconds
+        Similarity Threshold: {request.threshold}
+        Number of Differences: {len(request.differences)}
+        
+        Differences detected at these time segments:
+        {chr(10).join([f"- {d.start_sec:.1f}s to {d.end_sec:.1f}s (distance: {d.distance:.3f})" for d in request.differences[:20]])}
+        {'...' if len(request.differences) > 20 else ''}
+        
+        Please provide:
+        1. A concise analysis of what these differences might represent
+        2. Key insights about the comparison
+        3. Notable time segments where major differences occur
+        
+        Focus on practical insights that would be useful for video analysis.
+        """
+        
+        # Generate analysis using OpenAI
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an expert video analysis assistant. Provide clear, concise insights about video differences."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        analysis_text = response.choices[0].message.content
+        
+        # Extract key insights and time segments
+        key_insights = []
+        time_segments = []
+        
+        # Parse the analysis to extract structured information
+        lines = analysis_text.split('\n')
+        for line in lines:
+            if line.strip().startswith('-') or line.strip().startswith('•'):
+                key_insights.append(line.strip())
+            elif 'second' in line.lower() or 'minute' in line.lower():
+                time_segments.append(line.strip())
+        
+        # If no structured data found, create basic insights
+        if not key_insights:
+            key_insights = [f"Found {len(request.differences)} differences across {request.video_duration:.1f} seconds"]
+        
+        if not time_segments:
+            time_segments = [f"Major differences detected at {len(request.differences)} time segments"]
+        
+        return OpenAIAnalysisResponse(
+            analysis=analysis_text,
+            key_insights=key_insights,
+            time_segments=time_segments
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating OpenAI analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate analysis: {str(e)}")
 
 @app.post("/compare-local-videos", response_model=ComparisonResponse)
 async def compare_local_videos(

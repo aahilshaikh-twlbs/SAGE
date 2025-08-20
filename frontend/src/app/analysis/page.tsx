@@ -38,6 +38,13 @@ export default function AnalysisPage() {
   const [video2Url, setVideo2Url] = useState<string>('');
   const video1Ref = useRef<HTMLVideoElement>(null);
   const video2Ref = useRef<HTMLVideoElement>(null);
+  
+  // OpenAI Analysis state
+  const [openaiAnalysis, setOpenaiAnalysis] = useState<string>('');
+  const [keyInsights, setKeyInsights] = useState<string[]>([]);
+  const [timeSegments, setTimeSegments] = useState<string[]>([]);
+  const [isGeneratingAnalysis, setIsGeneratingAnalysis] = useState(false);
+  const [hasOpenAIKey, setHasOpenAIKey] = useState(false);
 
   const loadComparison = async (video1: VideoData, video2: VideoData, thresholdValue: number) => {
     try {
@@ -57,6 +64,32 @@ export default function AnalysisPage() {
       setError('Failed to load comparison data. Please try again.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const generateOpenAIAnalysis = async () => {
+    if (!video1Data || !video2Data || differences.length === 0) return;
+    
+    try {
+      setIsGeneratingAnalysis(true);
+      setError(null);
+      
+      const analysis = await api.generateOpenAIAnalysis(
+        video1Data.embedding_id,
+        video2Data.embedding_id,
+        differences,
+        threshold,
+        Math.max(video1Data.duration, video2Data.duration)
+      );
+      
+      setOpenaiAnalysis(analysis.analysis);
+      setKeyInsights(analysis.key_insights);
+      setTimeSegments(analysis.time_segments);
+    } catch (err) {
+      console.error('Error generating OpenAI analysis:', err);
+      setError('Failed to generate AI analysis. Please check your OpenAI API key.');
+    } finally {
+      setIsGeneratingAnalysis(false);
     }
   };
 
@@ -98,32 +131,37 @@ export default function AnalysisPage() {
           
           // Get video URLs for playback
           try {
-            const url1 = await api.getVideoUrl(updatedVideo1.video_id);
-            const url2 = await api.getVideoUrl(updatedVideo2.video_id);
+            const url1 = await api.getVideoUrl(video1.video_id);
+            const url2 = await api.getVideoUrl(video2.video_id);
             setVideo1Url(url1);
             setVideo2Url(url2);
           } catch (urlError) {
             console.error('Error getting video URLs:', urlError);
-            setError('Failed to load video URLs');
+            setError('Failed to load video URLs. Please try again.');
           }
           
-          // Compare videos with default threshold
+          // Load initial comparison
           await loadComparison(updatedVideo1, updatedVideo2, threshold);
+          
         } catch (statusError) {
           console.error('Error getting video status:', statusError);
-          // Fall back to session storage data if status check fails
-          setVideo1Data(video1);
-          setVideo2Data(video2);
-          await loadComparison(video1, video2, threshold);
+          setError('Failed to get video status. Please check if videos are still available.');
         }
-      } catch (err) {
-        console.error('Error loading data:', err);
-        setError('Failed to load comparison data');
+        
+      } catch (error) {
+        console.error('Error loading data:', error);
+        setError('Failed to load video data. Please try again.');
       }
     };
     
     loadData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Check for OpenAI API key
+  useEffect(() => {
+    const openaiKey = localStorage.getItem('sage_openai_key');
+    setHasOpenAIKey(!!openaiKey);
+  }, []);
 
   const handleThresholdChange = async () => {
     if (video1Data && video2Data) {
@@ -226,9 +264,10 @@ export default function AnalysisPage() {
   // Use the longer video's duration for timeline
   const maxDuration = Math.max(video1Data.duration, video2Data.duration);
   
-  // For very long videos, don't show individual segment details to avoid UI clutter
+  // For very long videos, show segments but make timeline non-clickable to avoid UI clutter
   const isLongVideo = maxDuration > 300; // 5 minutes
-  const showSegmentDetails = !isLongVideo;
+  const showSegmentDetails = true; // Always show segments
+  const timelineClickable = !isLongVideo; // Only make timeline clickable for shorter videos
 
   return (
     <div className="min-h-screen bg-[#F4F3F3] text-[#1D1C1B]">
@@ -419,9 +458,11 @@ export default function AnalysisPage() {
                 {/* Main playback track */}
                 <div className="relative h-3 bg-[#E5E5E5] rounded-full cursor-pointer group"
                      onClick={(e) => {
-                       const rect = e.currentTarget.getBoundingClientRect();
-                       const percent = (e.clientX - rect.left) / rect.width;
-                       seekToTime(percent * maxDuration);
+                       if (timelineClickable) {
+                         const rect = e.currentTarget.getBoundingClientRect();
+                         const percent = (e.clientX - rect.left) / rect.width;
+                         seekToTime(percent * maxDuration);
+                       }
                      }}>
                   {/* Progress bar */}
                   <div 
@@ -469,7 +510,7 @@ export default function AnalysisPage() {
                       <p className="text-[#9B9896] text-center py-8">
                         No significant differences found
                       </p>
-                    ) : showSegmentDetails ? (
+                    ) : (
                       // Show individual segments for shorter videos
                       differences.map((diff, index) => {
                         const isFullVideo = diff.start_sec === 0 && diff.end_sec >= video1Data?.duration - 1;
@@ -498,16 +539,6 @@ export default function AnalysisPage() {
                           </div>
                         );
                       })
-                    ) : (
-                      // For long videos, show a summary
-                      <div className="text-center py-8">
-                        <p className="text-[#9B9896] mb-2">
-                          {differences.length} differences detected across {formatTime(maxDuration)} duration
-                        </p>
-                        <p className="text-xs text-[#9B9896]">
-                          Individual segments hidden for videos longer than 5 minutes
-                        </p>
-                      </div>
                     )}
                   </div>
 

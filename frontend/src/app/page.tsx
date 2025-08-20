@@ -27,24 +27,27 @@ export default function LandingPage() {
   const [uploadedVideos, setUploadedVideos] = useState<LocalVideo[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Check for stored API key on component mount
+  // Check for stored API keys on component mount
   useEffect(() => {
-    const checkStoredApiKey = async () => {
+    const checkStoredApiKeys = async () => {
       try {
-        const storedKey = localStorage.getItem('sage_api_key');
-        if (storedKey) {
-          const result = await api.validateApiKey(storedKey);
+        const storedTwelveLabsKey = localStorage.getItem('sage_twelvelabs_key');
+        const storedOpenAIKey = localStorage.getItem('sage_openai_key');
+        
+        if (storedTwelveLabsKey) {
+          const result = await api.validateApiKey(storedTwelveLabsKey);
           if (result.isValid) {
             setShowApiKeyConfig(false);
           } else {
-            localStorage.removeItem('sage_api_key');
+            localStorage.removeItem('sage_twelvelabs_key');
+            localStorage.removeItem('sage_openai_key');
             setShowApiKeyConfig(true);
           }
         } else {
           setShowApiKeyConfig(true);
         }
       } catch (error) {
-        console.error('Error checking stored API key:', error);
+        console.error('Error checking stored API keys:', error);
         // If it's a connection error, show the API key config to let user retry
         if (error instanceof Error && error.message.includes('Failed to fetch')) {
           setError('Cannot connect to backend. Please check your connection and try again.');
@@ -58,7 +61,7 @@ export default function LandingPage() {
       }
     };
 
-    checkStoredApiKey();
+    checkStoredApiKeys();
   }, []);
 
   // Poll for video status updates
@@ -164,8 +167,11 @@ export default function LandingPage() {
     };
   }, [uploadedVideos.length]); // Only recreate when number of videos changes
 
-  const handleKeyValidated = (key: string) => {
-    localStorage.setItem('sage_api_key', key);
+  const handleKeysValidated = (twelveLabsKey: string, openaiKey: string) => {
+    localStorage.setItem('sage_twelvelabs_key', twelveLabsKey);
+    if (openaiKey.trim()) {
+      localStorage.setItem('sage_openai_key', openaiKey);
+    }
     setShowApiKeyConfig(false);
     setError(null); // Clear any connection errors
   };
@@ -379,7 +385,7 @@ export default function LandingPage() {
   if (showApiKeyConfig) {
     return (
       <div className="min-h-screen bg-sage-50 flex items-center justify-center p-4">
-        <ApiKeyConfig onKeyValidated={handleKeyValidated} />
+        <ApiKeyConfig onKeysValidated={handleKeysValidated} />
       </div>
     );
   }
@@ -410,7 +416,7 @@ export default function LandingPage() {
               size="sm"
               className="border-sage-200 hover:bg-sage-50 text-sage-400"
             >
-              Change API Key
+              Change API Keys
             </Button>
           </div>
         </div>

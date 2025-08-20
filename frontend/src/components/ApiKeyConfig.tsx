@@ -7,31 +7,32 @@ import { api } from '@/lib/api';
 import { Key, Loader2, CheckCircle, XCircle } from 'lucide-react';
 
 interface ApiKeyConfigProps {
-  onKeyValidated: (key: string) => void;
+  onKeysValidated: (twelveLabsKey: string, openaiKey: string) => void;
 }
 
-export function ApiKeyConfig({ onKeyValidated }: ApiKeyConfigProps) {
-  const [apiKey, setApiKey] = useState('');
+export function ApiKeyConfig({ onKeysValidated }: ApiKeyConfigProps) {
+  const [twelveLabsKey, setTwelveLabsKey] = useState('');
+  const [openaiKey, setOpenaiKey] = useState('');
   const [isValidating, setIsValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!apiKey.trim()) return;
+    if (!twelveLabsKey.trim()) return;
 
     setIsValidating(true);
     setValidationResult('idle');
     setErrorMessage('');
 
     try {
-      const result = await api.validateApiKey(apiKey);
+      const result = await api.validateApiKey(twelveLabsKey);
       if (result.isValid) {
         setValidationResult('success');
-        setTimeout(() => onKeyValidated(apiKey), 1000);
+        setTimeout(() => onKeysValidated(twelveLabsKey, openaiKey), 1000);
       } else {
         setValidationResult('error');
-        setErrorMessage('Invalid API key. Please check your key and try again.');
+        setErrorMessage('Invalid TwelveLabs API key. Please check your key and try again.');
       }
     } catch {
       setValidationResult('error');
@@ -51,24 +52,40 @@ export function ApiKeyConfig({ onKeyValidated }: ApiKeyConfigProps) {
           Welcome to SAGE
         </CardTitle>
         <CardDescription className="text-sage-300">
-          AI-powered video comparison with TwelveLabs
+          AI-powered video comparison with TwelveLabs & OpenAI
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="api-key" className="block text-sm font-medium text-sage-400 mb-2">
-              TwelveLabs API Key
+            <label htmlFor="twelvelabs-key" className="block text-sm font-medium text-sage-400 mb-2">
+              TwelveLabs API Key *
             </label>
             <input
-              id="api-key"
+              id="twelvelabs-key"
               type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter your API key"
+              value={twelveLabsKey}
+              onChange={(e) => setTwelveLabsKey(e.target.value)}
+              placeholder="Enter your TwelveLabs API key"
               className="w-full px-3 py-2 border border-sage-200 rounded-md bg-white text-sage-400 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-500 focus:border-transparent"
               required
             />
+            <p className="text-xs text-sage-300 mt-1">Required for video embedding generation</p>
+          </div>
+
+          <div>
+            <label htmlFor="openai-key" className="block text-sm font-medium text-sage-400 mb-2">
+              OpenAI API Key
+            </label>
+            <input
+              id="openai-key"
+              type="password"
+              value={openaiKey}
+              onChange={(e) => setOpenaiKey(e.target.value)}
+              placeholder="Enter your OpenAI API key (optional)"
+              className="w-full px-3 py-2 border border-sage-200 rounded-md bg-white text-sage-400 placeholder-sage-300 focus:outline-none focus:ring-2 focus:ring-sage-500 focus:border-transparent"
+            />
+            <p className="text-xs text-sage-300 mt-1">Optional: Enables AI-powered analysis summaries</p>
           </div>
           
           {validationResult === 'error' && (
@@ -87,7 +104,7 @@ export function ApiKeyConfig({ onKeyValidated }: ApiKeyConfigProps) {
           
           <Button
             type="submit"
-            disabled={isValidating || !apiKey.trim()}
+            disabled={isValidating || !twelveLabsKey.trim()}
             className="w-full bg-sage-500 hover:bg-sage-600 text-white disabled:opacity-50"
           >
             {isValidating ? (

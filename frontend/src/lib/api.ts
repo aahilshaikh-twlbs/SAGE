@@ -174,6 +174,37 @@ class ApiClient {
     return this.request<HealthResponse>('/health');
   }
 
+  async generateOpenAIAnalysis(
+    embeddingId1: string,
+    embeddingId2: string,
+    differences: Array<{
+      start_sec: number;
+      end_sec: number;
+      distance: number;
+    }>,
+    threshold: number,
+    videoDuration: number
+  ): Promise<{
+    analysis: string;
+    key_insights: string[];
+    time_segments: string[];
+  }> {
+    return this.request<{
+      analysis: string;
+      key_insights: string[];
+      time_segments: string[];
+    }>('/openai-analysis', {
+      method: 'POST',
+      body: JSON.stringify({
+        embedding_id1: embeddingId1,
+        embedding_id2: embeddingId2,
+        differences,
+        threshold,
+        video_duration: videoDuration
+      }),
+    });
+  }
+
   getVideoUrl(videoId: string): Promise<string> {
     return this.request<{video_url: string}>(`/serve-video/${videoId}`)
       .then(response => response.video_url);
