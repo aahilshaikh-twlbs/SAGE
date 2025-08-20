@@ -687,7 +687,7 @@ async def generate_openai_analysis(request: OpenAIAnalysisRequest):
         
         # Generate analysis using OpenAI
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+            model="gpt-5-nano",
             messages=[
                 {"role": "system", "content": "You are an expert video analysis assistant. Provide clear, concise insights about video differences."},
                 {"role": "user", "content": prompt}
