@@ -421,15 +421,15 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
                             pass
                         
                         # For long videos, sometimes a retry helps
-                        if timeout_seconds > 900:  # Only retry for videos longer than 15 minutes
-                            logger.info(f"Attempting retry for long video task {task.id}")
+                        if timeout_seconds > 600:  # Retry for videos longer than 10 minutes
+                            logger.info(f"Attempting retry for video task {task.id}")
                             try:
                                 # Create a new task with the same parameters
                                 retry_task = tl.embed.task.create(
                                     model_name="Marengo-retrieval-2.7",
                                     video_url=presigned_url,
-                                    video_clip_length=2,
-                                    video_embedding_scopes=["clip", "video"]
+                                    video_clip_length=clip_length,
+                                    video_embedding_scopes=embedding_scopes
                                 )
                                 logger.info(f"Retry task {retry_task.id} created for {embedding_id}")
                                 
@@ -445,7 +445,28 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
                                 logger.error(f"Retry task also failed: {retry_error}")
                                 raise Exception(f"Task {task.id} failed and retry also failed: {retry_error}")
                         else:
-                            raise Exception(f"Task {task.id} failed with status: failed")
+                            # Even for shorter videos, try one retry
+                            logger.info(f"Attempting single retry for video task {task.id}")
+                            try:
+                                retry_task = tl.embed.task.create(
+                                    model_name="Marengo-retrieval-2.7",
+                                    video_url=presigned_url,
+                                    video_clip_length=clip_length,
+                                    video_embedding_scopes=embedding_scopes
+                                )
+                                logger.info(f"Retry task {retry_task.id} created for {embedding_id}")
+                                
+                                # Wait for retry task with shorter timeout
+                                retry_task.wait_for_done(sleep_interval=5, timeout=300)  # 5 minutes for retry
+                                logger.info(f"Retry task {retry_task.id} completed successfully")
+                                
+                                # Use the retry task instead
+                                task = retry_task
+                                break
+                                
+                            except Exception as retry_error:
+                                logger.error(f"Retry task also failed: {retry_error}")
+                                raise Exception(f"Task {task.id} failed and retry also failed: {retry_error}")
                     elif current_task.status == "processing":
                         # Task is still processing, wait longer between checks
                         await asyncio.sleep(30)  # Wait 30 seconds between API calls
