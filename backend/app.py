@@ -428,8 +428,8 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
                                 retry_task = tl.embed.task.create(
                                     model_name="Marengo-retrieval-2.7",
                                     video_url=presigned_url,
-                                    video_clip_length=clip_length,
-                                    video_embedding_scopes=embedding_scopes
+                                    video_clip_length=2,
+                                    video_embedding_scopes=["clip", "video"]
                                 )
                                 logger.info(f"Retry task {retry_task.id} created for {embedding_id}")
                                 
