@@ -362,32 +362,45 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         timeout_seconds = 1800  # 30 minutes default
         logger.info(f"Starting to wait for task {task.id} completion with timeout: {timeout_seconds}s")
         
-        # Manual status polling instead of task.wait_for_done() to handle long videos properly
-        start_time = time.time()
-        while True:
-            # Check if we've exceeded timeout
-            if time.time() - start_time > timeout_seconds:
-                logger.error(f"Task {task.id} timed out after {timeout_seconds}s")
-                raise Exception(f"Embedding task timed out after {timeout_seconds}s")
+        # Use the original task.wait_for_done() but with proper error handling
+        try:
+            task.wait_for_done(sleep_interval=5, callback=on_task_update, timeout=timeout_seconds)
+            logger.info(f"Task {task.id} completed successfully via wait_for_done")
+        except Exception as e:
+            logger.warning(f"wait_for_done failed: {e}, falling back to manual polling")
             
-            # Get current task status
-            current_task = tl.embed.task.retrieve(task.id)
-            logger.info(f"Task {task.id} status: {current_task.status}")
-            
-            # Check if task is complete
-            if current_task.status == "ready":
-                logger.info(f"Task {task.id} completed successfully")
-                break
-            elif current_task.status == "failed":
-                logger.error(f"Task {task.id} failed with status: failed")
-                raise Exception(f"Task {task.id} failed with status: failed")
-            elif current_task.status == "processing":
-                # Task is still processing, wait and check again
-                await asyncio.sleep(5)  # Wait 5 seconds before next check
-            else:
-                # Unknown status, log and continue
-                logger.warning(f"Task {task.id} has unknown status: {current_task.status}")
-                await asyncio.sleep(5)
+            # Fallback to manual polling if wait_for_done fails
+            start_time = time.time()
+            while True:
+                # Check if we've exceeded timeout
+                if time.time() - start_time > timeout_seconds:
+                    logger.error(f"Task {task.id} timed out after {timeout_seconds}s")
+                    raise Exception(f"Embedding task timed out after {timeout_seconds}s")
+                
+                # Get current task status (but don't do this every 5 seconds)
+                try:
+                    current_task = tl.embed.task.retrieve(task.id)
+                    logger.info(f"Task {task.id} status: {current_task.status}")
+                    
+                    # Check if task is complete
+                    if current_task.status == "ready":
+                        logger.info(f"Task {task.id} completed successfully via manual polling")
+                        break
+                    elif current_task.status == "failed":
+                        logger.error(f"Task {task.id} failed with status: failed")
+                        raise Exception(f"Task {task.id} failed with status: failed")
+                    elif current_task.status == "processing":
+                        # Task is still processing, wait longer between checks
+                        await asyncio.sleep(30)  # Wait 30 seconds between API calls
+                    else:
+                        # Unknown status, log and continue
+                        logger.warning(f"Task {task.id} has unknown status: {current_task.status}")
+                        await asyncio.sleep(30)
+                        
+                except Exception as poll_error:
+                    logger.warning(f"Error polling task {task.id}: {poll_error}")
+                    # Wait longer on error to avoid overwhelming the API
+                    await asyncio.sleep(60)
         
         logger.info(f"Task {task.id} completed, retrieving results...")
         
