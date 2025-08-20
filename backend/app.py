@@ -356,7 +356,17 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         def on_task_update(task: EmbeddingsTask):
             logger.info(f"Task {task.id} status: {task.status}")
         
-        task.wait_for_done(sleep_interval=5, callback=on_task_update)
+        # Add timeout for very long videos (over 15 minutes)
+        # TwelveLabs might have issues with extremely long videos
+        timeout_seconds = 1800  # 30 minutes default
+        logger.info(f"Starting to wait for task {task.id} completion with timeout: {timeout_seconds}s")
+        
+        try:
+            task.wait_for_done(sleep_interval=5, callback=on_task_update, timeout=timeout_seconds)
+            logger.info(f"Task {task.id} completed, retrieving results...")
+        except Exception as e:
+            logger.error(f"Task {task.id} timed out or failed during wait: {e}")
+            raise Exception(f"Embedding task timed out after {timeout_seconds}s")
         
         # Remove from active tasks
         if embedding_id in active_tasks:
@@ -364,6 +374,31 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
         
         # Get completed task
         completed_task = tl.embed.task.retrieve(task.id)
+        
+        # Validate that the task actually succeeded
+        if completed_task.status != "ready":
+            raise Exception(f"Task {completed_task.id} failed with status: {completed_task.status}")
+        
+        # Check if we have embeddings
+        if not completed_task.video_embedding:
+            logger.error(f"Task {completed_task.id} completed but no video_embedding found")
+            logger.error(f"Task status: {completed_task.status}")
+            logger.error(f"Task error: {getattr(completed_task, 'error', 'No error field')}")
+            raise Exception(f"Task {completed_task.id} completed but no video_embedding found")
+        
+        if not completed_task.video_embedding.segments:
+            logger.error(f"Task {completed_task.id} completed but no segments found in video_embedding")
+            logger.error(f"Video embedding object: {completed_task.video_embedding}")
+            logger.error(f"Video embedding type: {type(completed_task.video_embedding)}")
+            logger.error(f"Video embedding attributes: {dir(completed_task.video_embedding)}")
+            raise Exception(f"Task {completed_task.id} completed but no segments found in video_embedding")
+        
+        # Log successful embedding generation details
+        logger.info(f"Successfully generated embeddings for {embedding_id}")
+        logger.info(f"Task ID: {completed_task.id}")
+        logger.info(f"Task status: {completed_task.status}")
+        logger.info(f"Video embedding type: {type(completed_task.video_embedding)}")
+        logger.info(f"Number of segments: {len(completed_task.video_embedding.segments)}")
         
         # Calculate duration from video metadata or segments
         duration = 0
@@ -383,6 +418,28 @@ async def generate_embeddings_async(embedding_id: str, s3_url: str, api_key: str
             if total_segments > 1:
                 first_gap = completed_task.video_embedding.segments[1].start_offset_sec - completed_task.video_embedding.segments[0].start_offset_sec
                 logger.info(f"Segment spacing: {first_gap}s (should be 2s)")
+                
+            # Additional validation for long videos
+            if duration > 600:  # 10 minutes
+                logger.info(f"Long video detected ({duration}s), validating segment count")
+                expected_segments = duration / 2  # 2-second segments
+                if abs(total_segments - expected_segments) > 10:  # Allow some tolerance
+                    logger.warning(f"Segment count mismatch for long video. Expected ~{expected_segments}, got {total_segments}")
+                    
+                # Additional validation for very long videos
+                if duration > 900:  # 15 minutes
+                    logger.info(f"Very long video detected ({duration}s), performing additional validation")
+                    if total_segments < 100:  # Should have at least 100 segments for a 15+ min video
+                        logger.error(f"Very long video has suspiciously few segments: {total_segments}")
+                        logger.error(f"This suggests the embedding generation may have failed")
+                        raise Exception(f"Very long video ({duration}s) has insufficient segments ({total_segments}) - embedding generation likely failed")
+                    
+                    # Check if segments cover the full duration
+                    if last_segment.end_offset_sec < duration * 0.8:  # Should cover at least 80% of duration
+                        logger.error(f"Segments don't cover full video duration. Last segment ends at {last_segment.end_offset_sec}s, video is {duration}s")
+                        raise Exception(f"Segments don't cover full video duration - embedding generation incomplete")
+        else:
+            raise Exception(f"No segments found in completed task {completed_task.id}")
         
         # Update embedding storage
         embedding_storage[embedding_id].update({
@@ -660,14 +717,36 @@ async def compare_local_videos(
         # Validate segment data
         if len(segments1) == 0:
             logger.error(f"Video1 has no segments! Duration: {duration1}s")
+            raise HTTPException(status_code=400, detail=f"Video1 has no segments - embedding generation may have failed. Duration: {duration1}s")
         if len(segments2) == 0:
             logger.error(f"Video2 has no segments! Duration: {duration2}s")
+            raise HTTPException(status_code=400, detail=f"Video2 has no segments - embedding generation may have failed. Duration: {duration2}s")
         
         # Expected segment count based on duration
         expected_segments1 = max(1, int(duration1 / 2))  # 2-second segments
         expected_segments2 = max(1, int(duration2 / 2))
         logger.info(f"Expected segments - Video1: {expected_segments1}, Video2: {expected_segments2}")
         logger.info(f"Actual segments - Video1: {len(segments1)}, Video2: {len(segments2)}")
+        
+        # Additional validation for segment count vs duration
+        if len(segments1) < expected_segments1 * 0.8:  # Allow 20% tolerance
+            logger.error(f"Video1 has insufficient segments. Expected at least {expected_segments1 * 0.8}, got {len(segments1)}")
+            raise HTTPException(status_code=400, detail=f"Video1 has insufficient segments - embedding generation incomplete. Expected ~{expected_segments1}, got {len(segments1)}")
+        
+        if len(segments2) < expected_segments2 * 0.8:  # Allow 20% tolerance
+            logger.error(f"Video2 has insufficient segments. Expected at least {expected_segments2 * 0.8}, got {len(segments2)}")
+            raise HTTPException(status_code=400, detail=f"Video2 has insufficient segments - embedding generation incomplete. Expected ~{expected_segments2}, got {len(segments2)}")
+        
+        # Validate that segments cover the full duration
+        if segments1 and segments1[-1]['end_offset_sec'] < duration1 * 0.8:
+            logger.error(f"Video1 segments don't cover full duration. Last segment ends at {segments1[-1]['end_offset_sec']}s, video is {duration1}s")
+            raise HTTPException(status_code=400, detail=f"Video1 segments don't cover full duration - embedding generation incomplete")
+        
+        if segments2 and segments2[-1]['end_offset_sec'] < duration2 * 0.8:
+            logger.error(f"Video2 segments don't cover full duration. Last segment ends at {segments2[-1]['end_offset_sec']}s, video is {duration2}s")
+            raise HTTPException(status_code=400, detail=f"Video2 segments don't cover full duration - embedding generation incomplete")
+        
+        logger.info(f"Segment validation passed - both videos have sufficient segments covering full duration")
         
         # Compare segments using actual embedding data
         differing_segments = []
