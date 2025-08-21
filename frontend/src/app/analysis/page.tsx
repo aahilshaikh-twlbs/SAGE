@@ -570,6 +570,73 @@ export default function AnalysisPage() {
             </Card>
           </div>
         </div>
+
+        {/* AI Analysis Section */}
+        {hasOpenAIKey && (
+          <div className="mt-8">
+            <Card className="p-6 bg-white border-[#D3D1CF]">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">AI Analysis</h2>
+                <Button
+                  onClick={generateOpenAIAnalysis}
+                  disabled={isGeneratingAnalysis || differences.length === 0}
+                  className="bg-[#0066FF] hover:bg-[#0052CC] text-white"
+                >
+                  {isGeneratingAnalysis ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Generating...
+                    </>
+                  ) : (
+                    'Generate Analysis'
+                  )}
+                </Button>
+              </div>
+
+              {openaiAnalysis ? (
+                <div className="space-y-4">
+                  <div className="bg-[#F8F9FA] p-4 rounded-lg">
+                    <h3 className="font-medium mb-2">Analysis Summary</h3>
+                    <p className="text-sm text-[#1D1C1B] whitespace-pre-wrap">{openaiAnalysis}</p>
+                  </div>
+
+                  {keyInsights.length > 0 && (
+                    <div>
+                      <h3 className="font-medium mb-2">Key Insights</h3>
+                      <ul className="space-y-1">
+                        {keyInsights.map((insight, index) => (
+                          <li key={index} className="text-sm text-[#1D1C1B] flex items-start">
+                            <span className="text-[#0066FF] mr-2">•</span>
+                            {insight}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {timeSegments.length > 0 && (
+                    <div>
+                      <h3 className="font-medium mb-2">Notable Time Segments</h3>
+                      <ul className="space-y-1">
+                        {timeSegments.map((segment, index) => (
+                          <li key={index} className="text-sm text-[#1D1C1B] flex items-start">
+                            <span className="text-[#00CC88] mr-2">•</span>
+                            {segment}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-[#9B9896]">
+                  <p className="mb-2">Generate AI-powered analysis of the video differences</p>
+                  <p className="text-sm">Click "Generate Analysis" to get insights about what the differences might represent</p>
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
       </main>
     </div>
   );
