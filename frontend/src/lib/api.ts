@@ -1,4 +1,14 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 
+  (typeof window !== 'undefined' && window.location.hostname !== 'localhost' 
+    ? '/api'  // Use relative URL for production (works with Next.js rewrites)
+    : 'http://localhost:8000');
+
+// Debug logging
+if (typeof window !== 'undefined') {
+  console.log('API Base URL:', API_BASE_URL);
+  console.log('Current hostname:', window.location.hostname);
+  console.log('NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL);
+}
 
 export interface ApiKeyResponse {
   key: string;
