@@ -32,7 +32,7 @@ export default function LandingPage() {
     const checkStoredApiKeys = async () => {
       try {
         const storedTwelveLabsKey = localStorage.getItem('sage_twelvelabs_key');
-        const storedOpenAIKey = localStorage.getItem('sage_openai_key');
+        const _storedOpenAIKey = localStorage.getItem('sage_openai_key');
         
         if (storedTwelveLabsKey) {
           const result = await api.validateApiKey(storedTwelveLabsKey);

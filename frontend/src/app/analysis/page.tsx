@@ -155,7 +155,7 @@ export default function AnalysisPage() {
     };
     
     loadData();
-  }, []);
+  }, [threshold]);
 
   // Check for OpenAI API key
   useEffect(() => {
@@ -631,7 +631,7 @@ export default function AnalysisPage() {
               ) : (
                 <div className="text-center py-8 text-[#9B9896]">
                   <p className="mb-2">Generate AI-powered analysis of the video differences</p>
-                  <p className="text-sm">Click "Generate Analysis" to get insights about what the differences might represent</p>
+                  <p className="text-sm">Click &quot;Generate Analysis&quot; to get insights about what the differences might represent</p>
                 </div>
               )}
             </Card>
