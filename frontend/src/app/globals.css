@@ -2,6 +2,124 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Milling Font Faces (CDN) */
+@font-face {
+  font-family: 'Milling';
+  font-style: normal;
+  font-weight: 200;
+  src: url('https://d1eaw48ll8ut2y.cloudfront.net/FONTS/205TF-Milling-Simplex0,5mm.woff2') format('woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Milling';
+  font-style: normal;
+  font-weight: 300;
+  src: url('https://d1eaw48ll8ut2y.cloudfront.net/FONTS/205TF-Milling-Simplex0,75mm.woff2') format('woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Milling';
+  font-style: normal;
+  font-weight: 400;
+  src: url('https://d1eaw48ll8ut2y.cloudfront.net/FONTS/205TF-Milling-Duplex1mm.woff2') format('woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Milling';
+  font-style: normal;
+  font-weight: 500;
+  src: url('https://d1eaw48ll8ut2y.cloudfront.net/FONTS/205TF-Milling-Triplex1mm.woff2') format('woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Milling';
+  font-style: normal;
+  font-weight: 600;
+  src: url('https://d1eaw48ll8ut2y.cloudfront.net/FONTS/205TF-Milling-Triplex1,5mm.woff2') format('woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Milling';
+  font-style: normal;
+  font-weight: 700;
+  src: url('https://d1eaw48ll8ut2y.cloudfront.net/FONTS/205TF-Milling-Triplex2mm.woff2') format('woff2');
+  font-display: swap;
+}
+
+@layer base {
+  html {
+    font-family: 'Milling', 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    @apply text-base text-charcoal bg-chalk;
+  }
+  
+  /* Typography Hierarchy */
+  h1 {
+    @apply text-h1-mobile md:text-h1-desktop font-normal text-charcoal;
+  }
+  
+  h2 {
+    @apply text-h2-mobile md:text-h2-desktop font-normal text-charcoal;
+  }
+  
+  h3 {
+    @apply text-h3-mobile md:text-h3-desktop font-normal text-charcoal;
+  }
+  
+  h4 {
+    @apply text-h4-mobile md:text-h4-desktop font-normal text-charcoal;
+  }
+  
+  h5 {
+    @apply text-h5-mobile md:text-h5-desktop font-normal text-charcoal;
+  }
+  
+  h6 {
+    @apply text-h6-mobile md:text-h6-desktop font-normal text-charcoal;
+  }
+  
+  p {
+    @apply text-base text-charcoal;
+  }
+  
+  /* Override font-bold on headings to use medium weight (500) */
+  h1.font-bold,
+  h2.font-bold,
+  h3.font-bold,
+  h4.font-bold,
+  h5.font-bold,
+  h6.font-bold {
+    font-weight: 500 !important;
+    letter-spacing: 0.01em;
+  }
+  
+  /* Code elements use IBM Plex Mono */
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: 'IBM Plex Mono', monospace;
+    @apply text-code;
+  }
+  
+  /* Small text uppercase */
+  .text-small {
+    @apply text-sm uppercase;
+  }
+  
+  /* Tag text */
+  .text-tag {
+    @apply text-tag;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

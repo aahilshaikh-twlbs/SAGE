@@ -319,49 +319,49 @@ export default function LandingPage() {
     switch (video.status) {
       case 'uploading':
         return (
-          <div className="flex items-center gap-2 text-sage-500">
+          <div className="flex items-center gap-2 text-blue">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{video.progress || 'Uploading to S3...'}</span>
           </div>
         );
       case 'processing':
         return (
-          <div className="flex items-center gap-2 text-sage-500">
+          <div className="flex items-center gap-2 text-blue">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{video.progress || 'Generating embeddings...'}</span>
           </div>
         );
       case 'queued':
         return (
-          <div className="flex items-center gap-2 text-sage-400">
+          <div className="flex items-center gap-2 text-charcoal">
             <Loader2 className="w-4 h-4 animate-pulse" />
             <span>{video.progress || 'Waiting for previous video to complete...'}</span>
           </div>
         );
       case 'ready':
         return (
-          <div className="flex items-center gap-2 text-green-600">
+          <div className="flex items-center gap-2 text-success">
             <CheckCircle className="w-4 h-4" />
             <span>Ready</span>
           </div>
         );
       case 'error':
         return (
-          <div className="flex items-center gap-2 text-red-600">
+          <div className="flex items-center gap-2 text-error">
             <AlertCircle className="w-4 h-4" />
             <span>{video.error || 'Error'}</span>
           </div>
         );
       case 'cancelled':
         return (
-          <div className="flex items-center gap-2 text-gray-500">
+          <div className="flex items-center gap-2 text-ash">
             <StopCircle className="w-4 h-4" />
             <span>Cancelled</span>
           </div>
         );
       case 'uploaded':
         return (
-          <div className="flex items-center gap-2 text-sage-500">
+          <div className="flex items-center gap-2 text-blue">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>Starting embedding generation...</span>
           </div>
@@ -373,10 +373,10 @@ export default function LandingPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-sage-50 flex items-center justify-center">
+      <div className="min-h-screen bg-chalk flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-sage-500" />
-          <p className="text-sage-400">Loading SAGE...</p>
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-blue" />
+          <p className="text-charcoal">Loading SAGE...</p>
         </div>
       </div>
     );
@@ -384,27 +384,27 @@ export default function LandingPage() {
 
   if (showApiKeyConfig) {
     return (
-      <div className="min-h-screen bg-sage-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-chalk flex items-center justify-center p-4">
         <ApiKeyConfig onKeysValidated={handleKeysValidated} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-sage-50">
+    <div className="min-h-screen bg-chalk">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-sage-200">
+      <header className="bg-white shadow-sm border-b border-smoke">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
-              <div className="w-8 h-8 bg-sage-500 rounded-lg flex items-center justify-center">
+              <div className="w-8 h-8 bg-blue rounded-lg flex items-center justify-center">
                 <Video className="w-5 h-5 text-white" />
               </div>
-              <h1 className="text-xl font-semibold text-sage-400">SAGE</h1>
+              <h1 className="text-xl font-semibold text-charcoal">SAGE</h1>
               {/* Connection Status */}
               <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${error && error.includes('Cannot connect') ? 'bg-red-500' : 'bg-green-500'}`}></div>
-                <span className="text-sm text-sage-300">
+                <div className={`w-2 h-2 rounded-full ${error && error.includes('Cannot connect') ? 'bg-error' : 'bg-success'}`}></div>
+                <span className="text-sm text-ash">
                   {error && error.includes('Cannot connect') ? 'Backend Offline' : 'Backend Online'}
                 </span>
               </div>
@@ -414,7 +414,7 @@ export default function LandingPage() {
               onClick={() => setShowApiKeyConfig(true)}
               variant="outline"
               size="sm"
-              className="border-sage-200 hover:bg-sage-50 text-sage-400"
+              className="border-smoke hover:bg-chalk text-charcoal"
             >
               Change API Keys
             </Button>
@@ -425,10 +425,10 @@ export default function LandingPage() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
         <div className="text-center mb-8">
-          <h2 className="text-3xl font-bold text-sage-400 mb-4">
+          <h2 className="text-3xl font-bold text-charcoal mb-4">
             AI-Powered Video Comparison
           </h2>
-          <p className="text-lg text-sage-300 max-w-2xl mx-auto">
+          <p className="text-lg text-ash max-w-2xl mx-auto">
             Upload two videos and let our AI analyze them for differences using TwelveLabs embeddings.
           </p>
         </div>
@@ -456,14 +456,14 @@ export default function LandingPage() {
                   htmlFor="video-upload"
                   className={`inline-flex items-center gap-2 px-6 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
                     uploadedVideos.length >= 2
-                      ? 'border-sage-200 text-sage-300 cursor-not-allowed'
-                      : 'border-sage-300 text-sage-400 hover:border-sage-500 hover:text-sage-500'
+                      ? 'border-smoke text-ash cursor-not-allowed'
+                      : 'border-ash text-charcoal hover:border-blue hover:text-blue'
                   }`}
                 >
                   <Video className="w-5 h-5" />
                   {uploadedVideos.length >= 2 ? 'Maximum videos reached' : 'Choose video file'}
                 </label>
-                <p className="text-sm text-sage-300 mt-2">
+                <p className="text-sm text-ash mt-2">
                   MP4 format recommended. Maximum 2 videos.
                 </p>
               </div>
@@ -481,7 +481,7 @@ export default function LandingPage() {
                   {uploadedVideos.map((video) => (
                     <div
                       key={video.id}
-                      className="flex items-center gap-4 p-4 border border-sage-200 rounded-lg"
+                      className="flex items-center gap-4 p-4 border border-smoke rounded-lg"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
@@ -490,15 +490,15 @@ export default function LandingPage() {
                         className="w-20 h-12 object-cover rounded"
                       />
                       <div className="flex-1">
-                        <h4 className="font-medium text-sage-400">{video.file.name}</h4>
-                        <p className="text-sm text-sage-300">
+                        <h4 className="font-medium text-charcoal">{video.file.name}</h4>
+                        <p className="text-sm text-ash">
                           {video.file.size > 1024 * 1024
                             ? `${(video.file.size / (1024 * 1024)).toFixed(1)} MB`
                             : `${(video.file.size / 1024).toFixed(1)} KB`
                           }
                         </p>
                         {video.duration && (
-                          <p className="text-sm text-sage-300">
+                          <p className="text-sm text-ash">
                             Duration: {Math.floor(video.duration / 60)}:{(video.duration % 60).toFixed(0).padStart(2, '0')}
                           </p>
                         )}
@@ -511,7 +511,7 @@ export default function LandingPage() {
                           onClick={() => cancelVideo(video)}
                           variant="outline"
                           size="sm"
-                          className="border-sage-200 hover:bg-sage-50 text-sage-400"
+                          className="border-smoke hover:bg-chalk text-charcoal"
                         >
                           {video.status === 'processing' || video.status === 'uploading' || video.status === 'queued' ? (
                             <StopCircle className="w-4 h-4" />
@@ -548,7 +548,7 @@ export default function LandingPage() {
               <Button
                 onClick={startComparison}
                 size="lg"
-                className="bg-sage-500 hover:bg-sage-600 text-white px-8 py-3"
+                className="bg-blue hover:bg-blue-dark text-white px-8 py-3"
               >
                 <Play className="w-5 h-5 mr-2" />
                 Start Comparison
