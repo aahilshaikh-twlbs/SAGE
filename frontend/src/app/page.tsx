@@ -329,14 +329,14 @@ export default function LandingPage() {
     switch (video.status) {
       case 'uploading':
         return (
-          <div className="flex items-center gap-2 text-blue-light">
+          <div className="flex items-center gap-2 text-blue">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{video.progress || 'Uploading to S3...'}</span>
           </div>
         );
       case 'processing':
         return (
-          <div className="flex items-center gap-2 text-blue-light">
+          <div className="flex items-center gap-2 text-blue">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{video.progress || 'Generating embeddings...'}</span>
           </div>
@@ -371,7 +371,7 @@ export default function LandingPage() {
         );
       case 'uploaded':
         return (
-          <div className="flex items-center gap-2 text-blue-light">
+          <div className="flex items-center gap-2 text-blue">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>Starting embedding generation...</span>
           </div>
@@ -385,7 +385,7 @@ export default function LandingPage() {
     return (
       <div className="min-h-screen bg-chalk flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-light" />
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-blue" />
           <p className="text-charcoal">Loading SAGE...</p>
         </div>
       </div>
