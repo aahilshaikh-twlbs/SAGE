@@ -124,7 +124,7 @@ export function ApiKeyConfig({ onKeysValidated }: ApiKeyConfigProps) {
             href="https://twelvelabs.io/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue hover:text-blue-dark underline"
+            className="text-blue hover:text-blue-light underline"
           >
             Get one from TwelveLabs
           </a>

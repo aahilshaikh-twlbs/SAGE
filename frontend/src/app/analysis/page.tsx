@@ -228,7 +228,7 @@ export default function AnalysisPage() {
     if (distance >= 0.5) return 'bg-warning-light'; // Amber for moderately different
     if (distance >= 0.3) return 'bg-warning-light'; // Yellow for somewhat different
     if (distance >= 0.1) return 'bg-success-light'; // Light green for slightly different
-    return 'bg-blue'; // Blue for very similar (close to identical)
+    return 'bg-blue-light'; // Light Blue for very similar (close to identical)
   };
 
   const formatTime = (seconds: number) => {
@@ -606,7 +606,7 @@ export default function AnalysisPage() {
                       <ul className="space-y-1">
                         {keyInsights.map((insight, index) => (
                           <li key={index} className="text-sm text-charcoal flex items-start">
-                            <span className="text-blue mr-2">•</span>
+                            <span className="text-blue-light mr-2">•</span>
                             {insight}
                           </li>
                         ))}

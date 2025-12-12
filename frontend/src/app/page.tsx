@@ -209,6 +209,16 @@ export default function LandingPage() {
       return;
     }
     
+    // Prevent video 2 from being uploaded until video 1 is ready
+    if (uploadedVideos.length === 1) {
+      const video1 = uploadedVideos[0];
+      if (video1.status !== 'ready') {
+        setError('Please wait for the first video to finish uploading and processing before uploading a second video.');
+        event.target.value = '';
+        return;
+      }
+    }
+    
     // Allow selecting the same video twice for comparison
     // No duplicate check needed - user can compare a video with itself
     
@@ -319,14 +329,14 @@ export default function LandingPage() {
     switch (video.status) {
       case 'uploading':
         return (
-          <div className="flex items-center gap-2 text-blue">
+          <div className="flex items-center gap-2 text-blue-light">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{video.progress || 'Uploading to S3...'}</span>
           </div>
         );
       case 'processing':
         return (
-          <div className="flex items-center gap-2 text-blue">
+          <div className="flex items-center gap-2 text-blue-light">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>{video.progress || 'Generating embeddings...'}</span>
           </div>
@@ -361,7 +371,7 @@ export default function LandingPage() {
         );
       case 'uploaded':
         return (
-          <div className="flex items-center gap-2 text-blue">
+          <div className="flex items-center gap-2 text-blue-light">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span>Starting embedding generation...</span>
           </div>
@@ -375,7 +385,7 @@ export default function LandingPage() {
     return (
       <div className="min-h-screen bg-chalk flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-blue" />
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-4 text-blue-light" />
           <p className="text-charcoal">Loading SAGE...</p>
         </div>
       </div>
@@ -450,22 +460,33 @@ export default function LandingPage() {
                   onChange={handleVideoUpload}
                   className="hidden"
                   id="video-upload"
-                  disabled={uploadedVideos.length >= 2}
+                  disabled={uploadedVideos.length >= 2 || (uploadedVideos.length === 1 && uploadedVideos[0].status !== 'ready')}
                 />
                 <label
                   htmlFor="video-upload"
-                  className={`inline-flex items-center gap-2 px-6 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-                    uploadedVideos.length >= 2
+                  className={`inline-flex items-center gap-2 px-6 py-3 border-2 border-dashed rounded-lg transition-colors ${
+                    uploadedVideos.length >= 2 || (uploadedVideos.length === 1 && uploadedVideos[0].status !== 'ready')
                       ? 'border-smoke text-ash cursor-not-allowed'
-                      : 'border-ash text-charcoal hover:border-blue hover:text-blue'
+                      : 'border-ash text-charcoal hover:border-blue hover:text-blue cursor-pointer'
                   }`}
                 >
                   <Video className="w-5 h-5" />
-                  {uploadedVideos.length >= 2 ? 'Maximum videos reached' : 'Choose video file'}
+                  {uploadedVideos.length >= 2 
+                    ? 'Maximum videos reached' 
+                    : uploadedVideos.length === 1 && uploadedVideos[0].status !== 'ready'
+                    ? 'Wait for first video to finish'
+                    : 'Choose video file'}
                 </label>
                 <p className="text-sm text-ash mt-2">
                   MP4 format recommended. Maximum 2 videos.
                 </p>
+                {uploadedVideos.length === 1 && uploadedVideos[0].status !== 'ready' && (
+                  <div className="mt-3 p-3 bg-blue-light/20 border border-blue/30 rounded-lg">
+                    <p className="text-xs text-charcoal">
+                      <strong>Note:</strong> Please wait for the first video to finish uploading and processing before uploading a second video. Videos are processed sequentially to ensure optimal performance.
+                    </p>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -490,15 +511,15 @@ export default function LandingPage() {
                         className="w-20 h-12 object-cover rounded"
                       />
                       <div className="flex-1">
-                        <h4 className="font-medium text-charcoal">{video.file.name}</h4>
-                        <p className="text-sm text-ash">
+                        <h4 className="text-sm font-medium text-charcoal">{video.file.name}</h4>
+                        <p className="text-xs text-ash">
                           {video.file.size > 1024 * 1024
                             ? `${(video.file.size / (1024 * 1024)).toFixed(1)} MB`
                             : `${(video.file.size / 1024).toFixed(1)} KB`
                           }
                         </p>
                         {video.duration && (
-                          <p className="text-sm text-ash">
+                          <p className="text-xs text-ash">
                             Duration: {Math.floor(video.duration / 60)}:{(video.duration % 60).toFixed(0).padStart(2, '0')}
                           </p>
                         )}

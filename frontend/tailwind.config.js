@@ -61,9 +61,9 @@ module.exports = {
         
         // Masterbrand - Primary Colors (Blue)
         blue: {
-          DEFAULT: '#6CD5FD',
-          light: '#C4EEFE',
-          dark: '#366B7F',
+          DEFAULT: '#366B7F',  // Dark Blue as primary
+          light: '#6CD5FD',    // Light Blue (was default)
+          dark: '#366B7F',     // Dark Blue
         },
         
         // Masterbrand - Primary Colors (Green)
@@ -100,21 +100,21 @@ module.exports = {
         // System Colors - Info (Blue-based)
         info: {
           dark: '#366B7F',
-          DEFAULT: '#6CD5FD',
-          light: '#C4EEFE',
+          DEFAULT: '#366B7F',  // Dark Blue as primary
+          light: '#6CD5FD',
         },
         
         // Legacy Primary Scale (mapped to Blue/Green)
         primary: {
           50: '#C4EEFE',   // Light Blue
-          100: '#6CD5FD',  // Blue
+          100: '#6CD5FD',  // Light Blue
           200: '#BFF3A4',  // Light Green
-          300: '#366B7F',  // Dark Blue
+          300: '#366B7F',  // Dark Blue (primary)
           400: '#60E21B',  // Green
           500: '#30710E',  // Dark Green
           600: '#1D1C1B', // Charcoal
           700: '#1D1C1B', // Charcoal
-          DEFAULT: '#6CD5FD', // Blue as primary
+          DEFAULT: '#366B7F', // Dark Blue as primary
           foreground: '#FFFFFF', // White text on primary
         },
         
@@ -139,7 +139,7 @@ module.exports = {
         },
         border: '#D3D1CF',
         input: '#D3D1CF',
-        ring: '#6CD5FD',
+        ring: '#366B7F',
         secondary: {
           DEFAULT: '#ECECEC',
           foreground: '#1D1C1B',
